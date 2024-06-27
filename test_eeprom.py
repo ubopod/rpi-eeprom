@@ -35,43 +35,43 @@
 #     }
 
 import time
-import board
 import os
 import sys
-import string
-import random
-import json
 
 up_dir = os.path.dirname(os.path.abspath(__file__))+'/../../'
 print(up_dir)
 sys.path.append(up_dir)
-from lcd import LCD as LCD
+#from lcd import LCD as LCD
 #from ubo_keypad import KEYPAD as KEYPAD
-from ubo_keypad import * # Might have to revisit this form of import
+#from ubo_keypad import * # Might have to revisit this form of import
 from eeprom import *
 
-lcd = LCD()
-lcd.set_lcd_present(1)
+# lcd = LCD()
+# lcd.set_lcd_present(1)
 
 
 def main():
     """ Script to self test EEPROM"""
     test_result = False
     info = {}
-    lcd.display([(1,"Starting",0,"white"), (2,"EEPROM",0,"white"), (3,"Test", 0,"white")], 20)
+    print("starting eeprom test...")
+    #lcd.display([(1,"Starting",0,"white"), (2,"EEPROM",0,"white"), (3,"Test", 0,"white")], 20)
     e2p = EEPROM()
     if e2p.bus_address:
         # check if eeprom ic2bus is working
         e2p.test_result = True
     else:
         e2p.test_result = False
-        lcd.display([(1,"No EEPROM",0,"white"), (2,"IC Detected!",0,"white"), (3,chr(50),1,"red")], 20)
+        print("no eeprom IC detected!")
+        # lcd.display([(1,"No EEPROM",0,"white"), (2,"IC Detected!",0,"white"), (3,chr(50),1,"red")], 20)
         time.sleep(1)
         # abort test here...
         # return
     try:
         e2p.read_eeprom()
+        print("eeprom content read successfully! now parsing...")
         info = e2p.parse_eeprom()
+        print("printing parsed readback eeprom info")
         print(info)
         if (info.get("product_uuid") is not None):
             # eeprom does not have product uuid OR has product uuid but it is all zeros
@@ -86,13 +86,16 @@ def main():
                             # and check if it contains a valid serial number
                             serial_number = cdata["serial_number"]
                             if serial_number == 'ZNNEK99C84':
-                                lcd.display([(1,"Erasing",0,"white"), (2,"EEPROM",0,"white"), (3,"Content", 0,"white")], 20)
+                                print("erasing eeprom content...")
+                                #lcd.display([(1,"Erasing",0,"white"), (2,"EEPROM",0,"white"), (3,"Content", 0,"white")], 20)
                                 e2p.reset_eeprom()
                                 # lcd.display([(1,"EEPROM Reset",0,"white"), (2,"Successful!",0,"white"), (3,chr(56),1,"green")], 20)
-                                lcd.display([(1,"Serial Number:",0,"white"), (2,serial_number,0,"green"), (3,"Erased...",0,"white")], 19)
+                                print("serial number: ", serial_number)
+                                #lcd.display([(1,"Serial Number:",0,"white"), (2,serial_number,0,"green"), (3,"Erased...",0,"white")], 19)
                                 summary = e2p.gen_summary()
                                 serial_number = summary["serial_number"]
-                                lcd.display([(1,"Overwritting",0,"white"), (2,"Serial Number:",0,"white"), (3,serial_number,0,"green"), (4,"Updating Data",0,"white"), (5,"Please Wait...",0,"white")], 19)
+                                print("overwriting serial number: ", serial_number)
+                                # lcd.display([(1,"Overwritting",0,"white"), (2,"Serial Number:",0,"white"), (3,serial_number,0,"green"), (4,"Updating Data",0,"white"), (5,"Please Wait...",0,"white")], 19)
                                 #update eeprom with custom data that contains serial number
                                 print("creating a new serial_number.json file for summary")
                                 e2p.update_json(summary, f_json=serial_number+".json")
@@ -100,7 +103,7 @@ def main():
                                 e2p.update_eeprom(f_json=serial_number + ".json")
                             else:
                                 # show serial number on screem
-                                lcd.display([(1,"Already Has",0,"white"), (2,"Serial Number:",0,"white"), (3,serial_number,0,"green")], 19)
+                                #lcd.display([(1,"Already Has",0,"white"), (2,"Serial Number:",0,"white"), (3,serial_number,0,"green")], 19)
                                 print("Already has serial number: " + serial_number)
                                 #save custom data content into serial_number.json file
                                 cdata['eeprom'] = {'model': '24c32', 'bus_address': "0x50", 'test_result': e2p.test_result }
@@ -108,14 +111,17 @@ def main():
                                 print("update json summary suceeded!")
                                 time.sleep(2)
                     else:
-                        lcd.display([(1,"Corrupt",0,"white"), (2,"EEPROM",0,"white"), (3,"Content!", 0,"white")], 20)
+                        print("Corrupt EEPROM content!")
+                        #lcd.display([(1,"Corrupt",0,"white"), (2,"EEPROM",0,"white"), (3,"Content!", 0,"white")], 20)
                         time.sleep(1)
-                        lcd.display([(1,"Erasing",0,"white"), (2,"EEPROM",0,"white"), (3,"Content", 0,"white")], 20)
+                        print("Erasing EEPROM content...")
+                        #lcd.display([(1,"Erasing",0,"white"), (2,"EEPROM",0,"white"), (3,"Content", 0,"white")], 20)
                         e2p.reset_eeprom()
                         # lcd.display([(1,"EEPROM Reset",0,"white"), (2,"Successful!",0,"white"), (3,chr(56),1,"green")], 20)
                         summary = e2p.gen_summary()
                         serial_number = summary["serial_number"]
-                        lcd.display([(1,"Generating",0,"white"), (2,"Serial Number:",0,"white"), (3,serial_number,0,"green"), (4,"Updating Data",0,"white"), (5,"Please Wait...",0,"white")], 19)
+                        print("Generating serial number: ", serial_number)
+                        # lcd.display([(1,"Generating",0,"white"), (2,"Serial Number:",0,"white"), (3,serial_number,0,"green"), (4,"Updating Data",0,"white"), (5,"Please Wait...",0,"white")], 19)
                         #update eeprom with custom data that contains serial number
                         print("creating a new serial_number.json file for summary")
                         e2p.update_json(summary, f_json=serial_number+".json")
@@ -127,7 +133,8 @@ def main():
                     summary = e2p.gen_summary()
                     serial_number = summary["serial_number"]
                     # display serial on screen
-                    lcd.display([(1,"Generated New",0,"white"), (2,"Serial Number:",0,"white"), (3,serial_number,0,"green"), (4,"Updating Data",0,"white"), (5,"Please Wait...",0,"white")], 19)
+                    print("Generated new serial number: ", serial_number)
+                    #lcd.display([(1,"Generated New",0,"white"), (2,"Serial Number:",0,"white"), (3,serial_number,0,"green"), (4,"Updating Data",0,"white"), (5,"Please Wait...",0,"white")], 19)
                     #update eeprom with custom data that contains serial number
                     print("creating a new serial_number.json file for summary")
                     e2p.update_json(summary, f_json=serial_number+".json")
@@ -140,7 +147,8 @@ def main():
             # save content into [serial_number].json
             summary = e2p.gen_summary()
             serial_number = summary["serial_number"]
-            lcd.display([(1,"Generated New",0,"white"), (2,"Serial Number:",0,"white"), (3,serial_number,0,"green"), (4,"Updating Data",0,"white"), (5,"Please Wait...",0,"white")], 19) 
+            print("Generated new serial number: ", serial_number)
+            #lcd.display([(1,"Generated New",0,"white"), (2,"Serial Number:",0,"white"), (3,serial_number,0,"green"), (4,"Updating Data",0,"white"), (5,"Please Wait...",0,"white")], 19) 
             e2p.update_json(summary)
             # with open(serial_number + ".json", 'w') as outfile:
             #     json.dump(summary, outfile)
@@ -148,16 +156,19 @@ def main():
             e2p.update_eeprom(f_json = serial_number + ".json", \
                             f_setting = "eeprom_settings.txt")
     except Exception as e:
+        print("Execption caught!")
         print(e)
         e2p.test_result = False
     # display serial number on screen
     if e2p.test_result:
         # Display Test Result on LCD
-        lcd.display([(1,"EEPROM",0,"white"), (2, "Test Result:", 0, "white"), (3,"Passed",0,"green"), (4,chr(56),1,"green")], 22)
+        print("EEPROM test passed!")
+        #lcd.display([(1,"EEPROM",0,"white"), (2, "Test Result:", 0, "white"), (3,"Passed",0,"green"), (4,chr(56),1,"green")], 22)
         sys.exit(0)
     else:
         # Display Test Result on LCD
-        lcd.display([(1,"EEPROM",0,"white"), (2, "Test Result:", 0, "white"), (3,"Failed",0,"red"), (4,chr(50),1,"red")], 22)
+        print("EEPROM test failed!")
+        #lcd.display([(1,"EEPROM",0,"white"), (2, "Test Result:", 0, "white"), (3,"Failed",0,"red"), (4,chr(50),1,"red")], 22)
         sys.exit(1)
 
 
