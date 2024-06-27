@@ -1,22 +1,20 @@
 import time
-import board
 import os
 import sys
 import string
 import random
 import json
-import RPi.GPIO as GPIO
+# import RPi.GPIO as GPIO
+from gpiozero import DigitalOutputDevice
 import subprocess as sp
 
 up_dir = os.path.dirname(os.path.abspath(__file__))+'/../../'
-print(up_dir)
-print("hello")
 sys.path.append(up_dir)
 
-EEPROM_TOOLS_PATH = '/home/pi/ubo/setup/hats/eepromutils'
+EEPROM_TOOLS_PATH = '/usr/local/bin/'
 
-EEPROM_FILES = '/home/pi/ubo/tests/hw_acceptance/eeprom_files/'
-JSON_PATH = '/home/pi/ubo/tests/hw_acceptance/test_results/'
+EEPROM_FILES = './'
+JSON_PATH = './'
 
 if not os.path.exists(EEPROM_FILES):
   # Create a new directory because it does not exist 
@@ -51,7 +49,8 @@ class EEPROM:
         # Set this to the GPIO of EEPROM write protect (16):
         self.WRITE_PROTECT = 16
         #GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.WRITE_PROTECT, GPIO.OUT)
+        # GPIO.setup(self.WRITE_PROTECT, GPIO.OUT)
+        self.write_protect = DigitalOutputDevice(self.WRITE_PROTECT)
         self.clean_files()
         self.check_i2c()
         
@@ -123,7 +122,7 @@ class EEPROM:
             return info
         while myfile:
             line = myfile.readline()
-            print(line)
+            # print(line)
             c_data = []
             #process line 
             if line.startswith("product_uuid"):
@@ -143,15 +142,16 @@ class EEPROM:
                     c_data.extend(line.split())
                     line = myfile.readline()
                 #info["cdata"] = c_data
-                byte_array = bytearray.fromhex(''.join(c_data))
-                custom_data =  byte_array.decode("ISO-8859-1")
-                custom_data_clean = custom_data.replace("\n", "")
+                custom_data = ''.join(c_data)
+                #byte_array = bytearray.fromhex(''.join(c_data))
+                #custom_data =  byte_array.decode("ISO-8859-1")
+                custom_data_clean = custom_data.replace("\\", "")
                 print(custom_data_clean)
                 try:
-                    custom_data_json = json.loads(custom_data_clean)
-                    info["custom_data"] = custom_data_json
+                    info["custom_data"] = json.loads(custom_data_clean[:-1])
+                    print("loading as json")
                 except: 
-                    info["custom_data"] = custom_data
+                    info["custom_data"] = custom_data_clean[:-1]
             if line == "":
                 break
         myfile.close()
@@ -169,7 +169,8 @@ class EEPROM:
     def reset_eeprom(self):
          # disable write protect
         # set port/pin value to 0/GPIO.LOW/False       
-        GPIO.output(self.WRITE_PROTECT, GPIO.LOW)
+        self.write_protect.off()
+        #GPIO.output(self.WRITE_PROTECT, GPIO.LOW)
         print("Making blank binary file")
         #os.system("dd if=/dev/zero ibs=1k count=" + str(self.size_kbytes) + " of=blank.eep")
         sp.run(["dd", "if=/dev/zero", "ibs=1k", "count=" + str(self.size_kbytes), "of=" + self.blank_file])
@@ -179,14 +180,15 @@ class EEPROM:
         # write
         # enable write protect
         # set port/pin value to 1/GPIO.HIGH/True
-        GPIO.output(self.WRITE_PROTECT, GPIO.HIGH)
+        # GPIO.output(self.WRITE_PROTECT, GPIO.HIGH)
+        self.write_protect.on()
         time.sleep(0.5)
         # a second level eeprom functional test to test reset fucntionality
         # to make sure the eeprom is reset to blank by making sure read back image DOES contain
         # all zeros (4K bytes to be exact) - this is an addition to testing whether the eeprom is
         # detected on the i2c bus
         p1 = sp.run(["sudo", EEPROM_TOOLS_PATH + "/eepflash.sh", "-r", "-f=" + self.blank_readback_file, "-y", "-t=" + self.model])
-        print("GPIO 24 function is " + str(GPIO.gpio_function(24)))
+        # print("GPIO 24 function is " + str(GPIO.gpio_function(24)))
         #p1.wait()
         with open(self.blank_readback_file, "rb") as f:
             byte = f.read(1)
@@ -211,8 +213,9 @@ class EEPROM:
                 print("EEPROM reset failed!")
                 return False
             # disable write protect
-            # set port/pin value to 0/GPIO.LOW/False       
-            GPIO.output(self.WRITE_PROTECT, GPIO.LOW)
+            self.write_protect.off()
+            # set port/pin value to 0/GPIO.LOW/False
+            # GPIO.output(self.WRITE_PROTECT, GPIO.LOW)
             print("Writing generated binary file")
             #os.system("sudo " + EEPROM_TOOLS_PATH + "/eepflash.sh -w -f=" + f_bin + " -y -t=" + self.model)
             sp.run(["sudo", EEPROM_TOOLS_PATH + "/eepflash.sh", "-w", "-f=" + f_bin, "-y", "-t=" + self.model])
@@ -223,7 +226,8 @@ class EEPROM:
             # TODO: compare checksum of binary files
             # enable write protect
             # set port/pin value to 1/GPIO.HIGH/True
-            GPIO.output(self.WRITE_PROTECT, GPIO.HIGH)
+            self.write_protect.on()
+            # GPIO.output(self.WRITE_PROTECT, GPIO.HIGH)
         else:
             print("No EEPROM is detected!")
 
