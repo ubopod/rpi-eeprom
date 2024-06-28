@@ -58,13 +58,16 @@ def main():
         print("no eeprom IC detected!")
         time.sleep(1)
         # abort test here...
-        # return
+        return
     try:
         e2p.read_eeprom()
         print("eeprom content read successfully! now parsing...")
         info = e2p.parse_eeprom()
         print("printing parsed readback eeprom info")
-        print(info)
+        print("eeprom info: ", str(info))
+        if (info.get("product_uuid") is None):
+            # eeprom is blank
+            refresh_eeprom(e2p)
         if (info.get("product_uuid") is not None):
             # eeprom does not have product uuid OR has product uuid but it is all zeros
             if (info.get("product_uuid") != '00000000-0000-0000-0000-000000000000'):
@@ -73,43 +76,22 @@ def main():
                     # it has some custom data in eeprom
                     cdata = info.get("custom_data")
                     if type(cdata) is dict:
-                        if cdata.get("serial_number"):
+                        serial_number = cdata.get("serial_number")
+                        if serial_number:
                             # if eeprom custom data is not blank, then read the content 
                             # and check if it contains a valid serial number
-                            serial_number = cdata["serial_number"]
-                            if serial_number == 'ZNNEK99C84':
-                                print("erasing eeprom content...")
-                                e2p.reset_eeprom()
-                                print("serial number: ", serial_number)
-                                summary = e2p.gen_summary()
-                                serial_number = summary["serial_number"]
-                                print("overwriting serial number: ", serial_number)
-                                #update eeprom with custom data that contains serial number
-                                print("creating a new serial_number.json file for summary")
-                                e2p.update_json(summary, f_json=serial_number+".json")
-                                print("#### updating eeprom with summary only, preserving existing product data #####")
-                                e2p.update_eeprom(f_json=serial_number + ".json")
-                            else:
-                                # show serial number on screem
-                                print("Already has serial number: " + serial_number)
-                                #save custom data content into serial_number.json file
-                                cdata['eeprom'] = {'model': '24c32', 'bus_address': "0x50", 'test_result': e2p.test_result }
-                                e2p.update_json(summary=cdata, f_json=serial_number+".json")
-                                print("update json summary suceeded!")
-                                time.sleep(2)
+                            # show serial number on screem
+                            print("Already has serial number: " + serial_number)
+                            # save custom data content into serial_number.json file
+                            cdata['eeprom'] = {'model': '24c32', 'bus_address': "0x50", 'test_result': e2p.test_result }
+                            e2p.update_json(summary=cdata, f_json=serial_number+".json")
+                            print("update json summary suceeded!")
+                            time.sleep(2)
                     else:
                         print("Corrupt EEPROM content!")
                         time.sleep(1)
-                        print("Erasing EEPROM content...")
-                        e2p.reset_eeprom()
-                        summary = e2p.gen_summary()
-                        serial_number = summary["serial_number"]
-                        print("Generating serial number: ", serial_number)
-                        #update eeprom with custom data that contains serial number
-                        print("creating a new serial_number.json file for summary")
-                        e2p.update_json(summary, f_json=serial_number+".json")
-                        print("#### updating eeprom with summary only, preserving existing product data #####")
-                        e2p.update_eeprom(f_json=serial_number + ".json")
+                        # TODO: ask user before erasing
+                        refresh_eeprom(e2p)
                 else:
                     print("######eeprom has non-zero uuid but no custom data#####")
                     #generate a serial number
@@ -122,20 +104,7 @@ def main():
                     e2p.update_json(summary, f_json=serial_number+".json")
                     print("#### updating eeprom with summary only, preserving existing product data #####")
                     e2p.update_eeprom(f_json=serial_number + ".json")
-        else:
-            # eeprom is blank
-            print("###### eeprom is blank #######")
-            # if first time programming eeprom, then write a new serial number, 
-            # save content into [serial_number].json
-            summary = e2p.gen_summary()
-            serial_number = summary["serial_number"]
-            print("Generated new serial number: ", serial_number)
-            e2p.update_json(summary)
-            # with open(serial_number + ".json", 'w') as outfile:
-            #     json.dump(summary, outfile)
-            print("#### updating eeprom with new custom data and product data...")
-            e2p.update_eeprom(f_json = serial_number + ".json", \
-                            f_setting = "eeprom_settings.txt")
+
     except Exception as e:
         print("Execption caught!")
         print(e)
@@ -150,6 +119,18 @@ def main():
         print("EEPROM test failed!")
         sys.exit(1)
 
+
+def refresh_eeprom(e2p):
+    print("Erasing EEPROM content...")
+    e2p.reset_eeprom()
+    summary = e2p.gen_summary()
+    serial_number = summary["serial_number"]
+    print("Generating serial number: ", serial_number)
+    #update eeprom with custom data that contains serial number
+    print("creating a new serial_number.json file for summary")
+    e2p.update_json(summary, f_json=serial_number+".json")
+    print("#### updating eeprom with summary only, preserving existing product data #####")
+    e2p.update_eeprom(f_json=serial_number + ".json", f_setting="eeprom_settings.txt")
 
 if __name__ == '__main__':
     try:
