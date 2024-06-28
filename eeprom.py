@@ -251,7 +251,7 @@ class EEPROM:
         print("settings is file: " + f_txt)
         print("json data is file: " + JSON_PATH + f_json)
         #os.system(EEPROM_TOOLS_PATH + "/eepmake " + f_txt + " " + self.binary_file + " -c " + f_json)
-        sp.run([EEPROM_TOOLS_PATH + "/eepmake", f_txt, self.binary_file, "-c", JSON_PATH + f_json])
+        sp.run([EEPROM_TOOLS_PATH + "/eepmake", "-v1", f_txt, self.binary_file, "-c", JSON_PATH + f_json])
         print("Binary file is generated")
 
     def remove_custom_data(self, f_txt=None):
@@ -325,6 +325,36 @@ class EEPROM:
             data = {}
         return data, f_json
 
+    def update_serial(self, new_serial):
+        """
+        updates serial number on the eeprom
+        """
+        self.read_eeprom()
+        print("eeprom content read successfully! now parsing...")
+        info = self.parse_eeprom()
+        print(info)
+        if (info.get("product_uuid") is None):
+            print("no valid data on eeprom")
+            return
+        product_uuid = info.get("product_uuid")
+        custom_data = info.get("custom_data")
+        if product_uuid is not None:
+            if type(custom_data) is dict:
+                serial_number = custom_data.get("serial_number")
+                if serial_number:
+                    print("Already has serial number: " + serial_number)
+                    custom_data["serial_number"] = new_serial
+                    self.update_json(summary=custom_data, f_json=serial_number+".json")
+                    print("update json summary suceeded!")
+                    time.sleep(2)
+                    self.update_eeprom(f_json=serial_number + ".json")
+                else:
+                    print("no serial found on eeprom")
+            else:
+                print("invalid custom data")
+        else:
+            print("invalid eeprom content")
+        
     def update_json(self, summary={}, f_json=None):
         data, f_json = self.read_json(f_json)
         print("Updating json file: " + f_json)
