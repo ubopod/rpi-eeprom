@@ -86,6 +86,10 @@ class EEPROM:
             print("eeprom detected!")
             self.bus_address = "0x50"
             self.test_result = True
+        else if (os.system("i2cdetect -y 9 | grep '50: 50'") == 0):
+            print("eeprom detected!")
+            self.bus_address = "0x50"
+            self.test_result = True
         else:
             print("No eeprom detected!")
             self.bus_address = False
