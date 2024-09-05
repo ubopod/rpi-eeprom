@@ -82,11 +82,7 @@ class EEPROM:
         return self.serial_number
 
     def check_i2c(self):
-        if (os.system("i2cdetect -y 0 | grep '50: 50'") == 0):
-            print("eeprom detected!")
-            self.bus_address = "0x50"
-            self.test_result = True
-        else if (os.system("i2cdetect -y 9 | grep '50: 50'") == 0):
+        if (os.system("i2cdetect -y 9 | grep '50: 50'") == 0):
             print("eeprom detected!")
             self.bus_address = "0x50"
             self.test_result = True
