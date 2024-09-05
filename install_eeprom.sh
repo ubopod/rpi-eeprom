@@ -1,7 +1,8 @@
-git clone https://github.com/raspberrypi/hats.git
-wget -c https://raw.githubusercontent.com/RobertCNelson/tools/master/pkgs/dtc.sh
-chmod +x dtc.sh
-./dtc.sh
+git clone https://github.com/raspberrypi/utils
+sudo apt install cmake
 # then install these
-cd hats/eepromutils/
-make && sudo make install
+cd utils/eeptools
+cmake .
+make
+sudo make install
+sudo dtoverlay i2c-gpio i2c_gpio_sda=0 i2c_gpio_scl=1 bus=9
