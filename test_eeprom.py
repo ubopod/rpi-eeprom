@@ -33,7 +33,7 @@
 #         "bus_address": "0x51",
 #         "test_result": true
 #     }
-
+from eeprom import EEPROM
 import time
 import os
 import sys
@@ -41,12 +41,11 @@ import sys
 up_dir = os.path.dirname(os.path.abspath(__file__))+'/../../'
 print(up_dir)
 sys.path.append(up_dir)
-from eeprom import *
+
 
 
 def main():
     """ Script to self test EEPROM"""
-    test_result = False
     info = {}
     print("starting eeprom test...")
     e2p = EEPROM()
