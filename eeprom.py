@@ -1,10 +1,8 @@
 import time
 import os
 import sys
-import string
 import random
 import json
-# import RPi.GPIO as GPIO
 from gpiozero import DigitalOutputDevice
 import subprocess as sp
 
@@ -150,7 +148,7 @@ class EEPROM:
                 try:
                     info["custom_data"] = json.loads(custom_data_clean[:-1])
                     print("loading as json")
-                except: 
+                except json.JSONDecodeError: 
                     info["custom_data"] = custom_data_clean[:-1]
             if line == "":
                 break
@@ -187,7 +185,7 @@ class EEPROM:
         # to make sure the eeprom is reset to blank by making sure read back image DOES contain
         # all zeros (4K bytes to be exact) - this is an addition to testing whether the eeprom is
         # detected on the i2c bus
-        p1 = sp.run(["sudo", EEPROM_TOOLS_PATH + "/eepflash.sh", "-r", "-f=" + self.blank_readback_file, "-y", "-t=" + self.model])
+        sp.run(["sudo", EEPROM_TOOLS_PATH + "/eepflash.sh", "-r", "-f=" + self.blank_readback_file, "-y", "-t=" + self.model])
         # print("GPIO 24 function is " + str(GPIO.gpio_function(24)))
         #p1.wait()
         with open(self.blank_readback_file, "rb") as f:
@@ -208,7 +206,7 @@ class EEPROM:
         if self.bus_address:
             # clean EEPROM first
             r = self.reset_eeprom()
-            if (r == False):
+            if not r:
                 self.test_result = False
                 print("EEPROM reset failed!")
                 return False
@@ -299,7 +297,7 @@ class EEPROM:
             self.make_eeprom(f_txt=self.readback_text_file, f_json = f_json)
         print("writing new binary file to eeprom")
         r = self.write_eeprom()
-        if (r == False):
+        if not r:
             self.test_result = False
             print("EEPROM write failed!")
             return False
