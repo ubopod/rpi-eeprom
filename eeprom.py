@@ -220,12 +220,13 @@ class EEPROM:
     def _parse_eeprom_text(self, filename: str = "eeprom_dump.txt") -> Dict[str, Any]:
         """Internal method to parse the human-readable EEPROM text file.
         
-        This is an internal helper function that parses the text dump of EEPROM content.
+        This is an internal helper function that parses the text dump of EEPROM content based on HAT+ specification.
         It extracts:
         - Product UUID
         - Product ID and version
         - Vendor and product names
-        - Custom JSON data
+        - Device tree blob
+        - Custom data sections (can be multiple)
         
         This method should not be called directly. Use read_eeprom_content() instead.
         
@@ -236,6 +237,8 @@ class EEPROM:
             Dict containing structured EEPROM data
         """
         info: Dict[str, Any] = {}
+        custom_data_sections: list[Any] = []  # List to store all custom data sections
+        
         try:
             with open(self.dump_text, "r") as myfile:
                 for line in myfile:
@@ -243,7 +246,6 @@ class EEPROM:
                     if not line:
                         continue
                     
-                    c_data: list[str] = []
                     if line.startswith("product_uuid"):
                         info["product_uuid"] = line.split()[1]
                     elif line.startswith("product_id"):
@@ -254,24 +256,45 @@ class EEPROM:
                         info["vendor"] = line.split("\"")[1]
                     elif line.startswith("product"):
                         info["product"] = line.split("\"")[1]
+                    elif line.startswith("dt_blob"):
+                        info["dt_blob"] = line.split("\"")[1]
                     elif line.startswith("custom_data"):
-                        while True:
-                            line = myfile.readline().strip()
-                            if not line or "End of atom" in line:
-                                break
-                            c_data.extend(line.split())
-                        
-                        custom_data: str = ''.join(c_data)
-                        custom_data_clean: str = custom_data.replace("\\", "")
-                        try:
-                            info["custom_data"] = json.loads(custom_data_clean[:-1])
-                            logger.debug("Successfully parsed custom data as JSON")
-                        except json.JSONDecodeError:
-                            logger.warning("Failed to parse custom data as JSON, storing as string")
-                            info["custom_data"] = custom_data_clean[:-1]
+                        # Check if this is a quoted string format
+                        if line.strip() == "custom_data":
+                            # Unquoted format - read until "end" or "End of atom"
+                            c_data: list[str] = []
+                            while True:
+                                line = myfile.readline().strip()
+                                if not line or line == "end" or "End of atom" in line:
+                                    break
+                                c_data.extend(line.split())
+                            
+                            if c_data:  # Only process if we got some data
+                                custom_data: str = ' '.join(c_data)
+                                try:
+                                    # Try parsing as JSON
+                                    custom_data_sections.append(json.loads(custom_data))
+                                except json.JSONDecodeError:
+                                    # Store as raw string if not JSON
+                                    custom_data_sections.append(custom_data)
+                        else:
+                            # Quoted string format - extract between quotes
+                            quoted_data = line[line.find("\""):].strip()
+                            if quoted_data:
+                                try:
+                                    # Try parsing as JSON
+                                    custom_data_sections.append(json.loads(quoted_data))
+                                except json.JSONDecodeError:
+                                    # Remove enclosing quotes and store as string
+                                    custom_data_sections.append(quoted_data[1:-1])
                             
         except OSError as error:
             logger.error(f"Error reading EEPROM file: {error}")
+        
+        # Store all custom data sections
+        if custom_data_sections:
+            info["custom_data"] = custom_data_sections[0]  # Keep first section as before for backward compatibility
+            info["custom_data_all"] = custom_data_sections  # Store all sections in a new field
         
         return info
 
