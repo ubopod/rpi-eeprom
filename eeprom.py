@@ -375,7 +375,7 @@ class EEPROM:
             
             logger.info("Writing blank binary file to EEPROM")
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", f"-f={self.blank_file}", "-y", f"-t={self.model}"],
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", "-d=9", f"-f={self.blank_file}", "-y", f"-t={self.model}"],
                 capture_output=True,
                 text=True
             )
@@ -384,7 +384,7 @@ class EEPROM:
             
             logger.info("Verifying blank state")
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", f"-f={self.blank_readback_file}", "-y", f"-t={self.model}"],
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", "-d=9", f"-f={self.blank_readback_file}", "-y", f"-t={self.model}"],
                 capture_output=True,
                 text=True
             )
@@ -430,12 +430,12 @@ class EEPROM:
 
             logger.info(f"Writing binary file: {f_bin}")
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", f"-f={f_bin}", "-y", f"-t={self.model}"]
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", "-d=9", f"-f={f_bin}", "-y", f"-t={self.model}"]
             )
             
             logger.info("Reading back binary file for verification")
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", f"-f={self.binary_readback_file}", "-y", f"-t={self.model}"]
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", "-d=9", f"-f={self.binary_readback_file}", "-y", f"-t={self.model}"]
             )
 
             return True
@@ -602,7 +602,7 @@ class EEPROM:
                     # Disable write protect for restore
                     self.write_protect.off()
                     run_command(
-                        ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", f"-f={backup_binary}", "-y", f"-t={self.model}"]
+                        ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", "-d=9", f"-f={backup_binary}", "-y", f"-t={self.model}"]
                     )
                     logger.info("Backup restored successfully")
                 except Exception as restore_error:
