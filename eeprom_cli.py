@@ -40,6 +40,7 @@ def main() -> int:
     # Write command
     write_parser = subparsers.add_parser("write", help="Write to EEPROM")
     write_parser.add_argument("--serial", "-s", type=str, help="Serial number to write")
+    write_parser.add_argument("--json-file", "-j", type=Path, help="JSON file containing custom data to write")
     
     # Reset command
     subparsers.add_parser("reset", help="Reset EEPROM to blank state")
@@ -92,6 +93,23 @@ def main() -> int:
             return 1
             
         elif args.command == "write":
+            if args.json_file:
+                try:
+                    with open(args.json_file) as f:
+                        custom_data = json.load(f)
+                    logger.info(f"Loaded custom data from {args.json_file}")
+                    
+                    # Update EEPROM with custom data
+                    eeprom.update_json(custom_data)
+                    if eeprom.update_eeprom():
+                        logger.info("Successfully updated EEPROM with custom data")
+                        return 0
+                    logger.error("Failed to update EEPROM")
+                    return 1
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.error(f"Failed to load JSON file: {e}")
+                    return 1
+                    
             if args.serial:
                 if eeprom.update_serial_number(args.serial):
                     logger.info(f"Successfully updated serial number to: {args.serial}")
