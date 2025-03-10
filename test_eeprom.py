@@ -1,142 +1,207 @@
-# EEPROM initial test procedure
-#
-# - show beginning of test message on screen
-# - if ic2bus is working
-#        # now let's see if eeprom has been flashed before by ubo 
-# 	     # proceed to read the content of eeprom
-#        (1) First approach (requires reboot happened before)
-#           -> ls /proc/device-tree/hat/
-#           -> custom_0  custom_1  name  product  product_id  product_ver  uuid  vendor
-#           - read content of these files; if they don't exist, then eeprom has not been setup yet  
-#        (2) Second approach (no previos reboot required)
-#            sudo ./eepflash.sh -r -f=eeprom_readback.eep -t=24c32
-#            #convert eep file to text
-#            ./eepdump eeprom_readback.eep eeprom_setting_readback.txt
-#            # parse text file extract key values
-# 		- check if it contains a valid serial number 
-# 			- extract serial number, uuid, etc
-# 			- show in screen
-# 			- return result = true
-#    	- else:
-#    		- generate a serial number to write to eeprom
-#           - control GPIO to allow write to EEPROM
-# 			- write EEPRPM info and serial_number in test_report json file
-#           - validate write (read back and compare binary files hashes??)
-#    		- show success with serial number on screen
-#    		- return result = true
-# - else: 
-# 	- show EEPROM error message
-# 	- write EEPRPM into test_report json file
-# 
-#     "eeprom": {
-#         "model": "CAT24C32",
-#         "bus_address": "0x51",
-#         "test_result": true
-#     }
-from eeprom import EEPROM
-import time
+"""EEPROM test module.
+
+This module provides both unit tests for the EEPROM class and a main script
+for testing EEPROM hardware. The test script performs the following:
+
+1. Detects EEPROM presence on I2C bus
+2. Reads and validates existing content
+3. Handles various EEPROM states:
+   - Blank EEPROM: Performs full refresh with new serial
+   - Valid UUID: Updates or preserves existing content
+   - Invalid/corrupt content: Offers refresh option
+4. Provides detailed logging of operations
+
+Usage:
+    1. Run unit tests (no hardware required):
+       ```
+       # Run all tests
+       pytest test_eeprom.py -v
+       
+       # Run specific test
+       pytest test_eeprom.py -v -k "test_generate_serial_number"
+       
+       # Run with coverage report
+       pytest test_eeprom.py -v --cov=eeprom
+       ```
+       
+    2. Run hardware test (requires physical EEPROM):
+       ```
+       # Direct execution
+       python3 test_eeprom.py
+       
+       # With verbose output
+       python3 test_eeprom.py --verbose
+       ```
+       
+    Requirements:
+    - pytest
+    - pytest-cov (optional, for coverage reports)
+    - Physical EEPROM device (for hardware tests only)
+    - Proper I2C configuration
+    - Root access for EEPROM operations
+"""
+
 import os
 import sys
+import json
+import pytest
+from pathlib import Path
+from unittest.mock import patch
+from eeprom import EEPROM, EEPROMConfig, EEPROMError
 
-up_dir = os.path.dirname(os.path.abspath(__file__))+'/../../'
-print(up_dir)
-sys.path.append(up_dir)
+# Add parent directory to path for imports
+PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(PARENT_DIR)
 
+# Test Fixtures
+@pytest.fixture
+def temp_dir(tmp_path):
+    """Create temporary directory structure for tests."""
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "files").mkdir()
+    (tmp_path / "json").mkdir()
+    return tmp_path
 
+@pytest.fixture
+def config(temp_dir):
+    """Create test configuration."""
+    return EEPROMConfig(
+        tools_path=temp_dir / "tools",
+        files_path=temp_dir / "files",
+        json_path=temp_dir / "json"
+    )
 
-def main():
-    """ Script to self test EEPROM"""
-    info = {}
-    print("starting eeprom test...")
-    e2p = EEPROM()
-    if e2p.bus_address:
-        # check if eeprom ic2bus is working
-        e2p.test_result = True
-    else:
-        e2p.test_result = False
-        print("no eeprom IC detected!")
-        time.sleep(1)
-        # abort test here...
-        return
+@pytest.fixture
+def mock_gpio():
+    """Mock GPIO device."""
+    with patch('gpiozero.DigitalOutputDevice') as mock:
+        yield mock
+
+@pytest.fixture
+def eeprom(config, mock_gpio):
+    """Create EEPROM instance with mocked GPIO."""
+    with patch('eeprom.EEPROM._check_i2c'):
+        return EEPROM(config)
+
+# Unit Tests
+def test_init(eeprom):
+    """Test EEPROM initialization."""
+    assert eeprom.model == "24c32"
+    assert eeprom.size_kbytes == 4
+    assert eeprom.serial_number is None
+    assert isinstance(eeprom.binary_file, Path)
+
+def test_generate_serial_number(eeprom):
+    """Test serial number generation."""
+    serial = eeprom.generate_serial_number()
+    assert len(serial) == 12
+    assert all(c in "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789" for c in serial)
+
+@patch('subprocess.run')
+def test_read_raw_eeprom_no_device(mock_run, eeprom):
+    """Test reading EEPROM when no device is present."""
+    eeprom.bus_address = None
+    eeprom._read_raw_eeprom()
+    mock_run.assert_not_called()
+
+@patch('subprocess.run')
+def test_read_raw_eeprom_with_device(mock_run, eeprom):
+    """Test reading EEPROM when device is present."""
+    eeprom.bus_address = "0x50"
+    mock_run.return_value.returncode = 0
+    eeprom._read_raw_eeprom()
+    assert mock_run.call_count == 2
+
+def test_generate_summary(eeprom):
+    """Test summary generation."""
+    summary = eeprom.generate_summary()
+    assert "eeprom" in summary
+    assert "serial_number" in summary
+    assert summary["eeprom"]["model"] == "24c32"
+
+@patch('builtins.open', create=True)
+def test_parse_eeprom_text_empty(mock_open, eeprom):
+    """Test parsing empty EEPROM."""
+    mock_open.side_effect = OSError
+    info = eeprom._parse_eeprom_text()
+    assert info == {}
+
+@patch('builtins.open')
+def test_parse_eeprom_text_valid(mock_file_handler, eeprom):
+    """Test parsing valid EEPROM content."""
+    mock_file = mock_file_handler.return_value.__enter__.return_value
+    mock_file.readline.side_effect = [
+        "product_uuid 12345678-1234-5678-1234-567812345678\n",
+        "product_id 0x1234\n",
+        "product_ver 0x1\n",
+        'vendor "Test Vendor"\n',
+        'product "Test Product"\n',
+        "custom_data\n",
+        '{"serial_number": "ABC123"}\n',
+        "End of atom\n"
+    ]
+    info = eeprom._parse_eeprom_text()
+    assert info["product_uuid"] == "12345678-1234-5678-1234-567812345678"
+    assert info["custom_data"]["serial_number"] == "ABC123"
+
+def test_handle_existing_content_blank(eeprom):
+    """Test handling blank EEPROM."""
+    with patch.object(eeprom, 'refresh') as mock_refresh:
+        mock_refresh.return_value = True
+        result = eeprom.handle_existing_content({})
+        assert result is True
+        mock_refresh.assert_called_once()
+
+def test_handle_existing_content_zero_uuid(eeprom):
+    """Test handling EEPROM with zero UUID."""
+    with patch.object(eeprom, 'refresh') as mock_refresh:
+        mock_refresh.return_value = True
+        result = eeprom.handle_existing_content({
+            "product_uuid": "00000000-0000-0000-0000-000000000000"
+        })
+        assert result is True
+        mock_refresh.assert_called_once()
+
+# Main Test Script
+def run_eeprom_test() -> int:
+    """Run EEPROM hardware test.
+    
+    Returns:
+        int: 0 for success, 1 for failure
+    """
+    print("Starting EEPROM test...")
+    
     try:
-        e2p.read_eeprom()
-        print("eeprom content read successfully! now parsing...")
-        info = e2p.parse_eeprom()
-        print("printing parsed readback eeprom info")
-        print("eeprom info: ", str(info))
-        if (info.get("product_uuid") is None):
-            # eeprom is blank
-            refresh_eeprom(e2p)
-        if (info.get("product_uuid") is not None):
-            # eeprom does not have product uuid OR has product uuid but it is all zeros
-            if (info.get("product_uuid") != '00000000-0000-0000-0000-000000000000'):
-                # epprom has non-zero product uuid
-                if info.get("custom_data"):
-                    # it has some custom data in eeprom
-                    cdata = info.get("custom_data")
-                    if type(cdata) is dict:
-                        serial_number = cdata.get("serial_number")
-                        if serial_number:
-                            # if eeprom custom data is not blank, then read the content 
-                            # and check if it contains a valid serial number
-                            # show serial number on screem
-                            print("Already has serial number: " + serial_number)
-                            # save custom data content into serial_number.json file
-                            cdata['eeprom'] = {'model': '24c32', 'bus_address': "0x50", 'test_result': e2p.test_result }
-                            e2p.update_json(summary=cdata, f_json=serial_number+".json")
-                            print("update json summary suceeded!")
-                            time.sleep(2)
-                    else:
-                        print("Corrupt EEPROM content!")
-                        time.sleep(1)
-                        # TODO: ask user before erasing
-                        refresh_eeprom(e2p)
-                else:
-                    print("######eeprom has non-zero uuid but no custom data#####")
-                    #generate a serial number
-                    summary = e2p.gen_summary()
-                    serial_number = summary["serial_number"]
-                    # display serial on screen
-                    print("Generated new serial number: ", serial_number)
-                    #update eeprom with custom data that contains serial number
-                    print("creating a new serial_number.json file for summary")
-                    e2p.update_json(summary, f_json=serial_number+".json")
-                    print("#### updating eeprom with summary only, preserving existing product data #####")
-                    e2p.update_eeprom(f_json=serial_number + ".json")
-
+        eeprom = EEPROM()
+        
+        if not eeprom.bus_address:
+            print("No EEPROM device detected!")
+            return 1
+            
+        print("Reading EEPROM content...")
+        info = eeprom.read_eeprom_content()
+        if not info:
+            print("Failed to read EEPROM content!")
+            return 1
+            
+        print(f"EEPROM info: {json.dumps(info, indent=2)}")
+        
+        if eeprom.handle_existing_content(info):
+            print("EEPROM test passed!")
+            return 0
+        else:
+            print("EEPROM test failed - could not handle content!")
+            return 1
+            
+    except EEPROMError as e:
+        print(f"EEPROM Error: {e}")
+        return 1
     except Exception as e:
-        print("Execption caught!")
-        print(e)
-        e2p.test_result = False
-    # display serial number on screen
-    if e2p.test_result:
-        # Display Test Result on LCD
-        print("EEPROM test passed!")
-        sys.exit(0)
-    else:
-        # Display Test Result on LCD
-        print("EEPROM test failed!")
-        sys.exit(1)
-
-
-def refresh_eeprom(e2p):
-    print("Erasing EEPROM content...")
-    e2p.reset_eeprom()
-    summary = e2p.gen_summary()
-    serial_number = summary["serial_number"]
-    print("Generating serial number: ", serial_number)
-    #update eeprom with custom data that contains serial number
-    print("creating a new serial_number.json file for summary")
-    e2p.update_json(summary, f_json=serial_number+".json")
-    print("#### updating eeprom with summary only, preserving existing product data #####")
-    e2p.update_eeprom(f_json=serial_number + ".json", f_setting="eeprom_settings.txt")
+        print(f"Unexpected error: {e}")
+        return 1
+    except KeyboardInterrupt:
+        print("\nTest interrupted by user")
+        return 130
 
 if __name__ == '__main__':
-    try:
-        main()
-    except KeyboardInterrupt:
-        print('Interrupted')
-        try:
-            sys.exit(0)
-        except SystemExit:
-            os._exit(0)
+    sys.exit(run_eeprom_test())
