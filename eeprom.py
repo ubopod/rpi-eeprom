@@ -459,20 +459,36 @@ class EEPROM:
             self.write_protect.on()
             logger.info("Write protect re-enabled")
 
-    def _make_eeprom(self, f_txt: Optional[str] = None, f_json: Optional[str] = None) -> None:
-        """Internal method to create EEPROM binary file from text and JSON inputs."""
+    def _make_eeprom(self, f_txt: Optional[str] = None, f_json: Optional[Union[str, list[str]]] = None) -> None:
+        """Internal method to create EEPROM binary file from text and JSON inputs.
+        
+        Args:
+            f_txt: Optional path to template text file
+            f_json: Optional JSON filename(s). Can be a single filename or list of filenames
+                   for multiple custom data sections.
+        """
         if not f_txt:
             f_txt = self.config.files_path / self.template_text
-        if not f_json:
-            f_json = self.default_config
-
+            
+        # Handle single JSON file case
+        if isinstance(f_json, str) or f_json is None:
+            f_json = [f_json if f_json else self.default_config]
+            
         logger.info("Making eeprom binary file")
         logger.info(f"Settings file: {f_txt}")
-        logger.info(f"JSON data file: {self.config.json_path}{f_json}")
         
-        run_command(
-            [f"{self.config.tools_path}/eepmake", "-v1", f_txt, self.image_binary, "-c", f"{self.config.json_path}{f_json}"]
-        )
+        # Build command with base arguments
+        cmd = [f"{self.config.tools_path}/eepmake", "-v1", f_txt, self.image_binary]
+        
+        # Add custom data files if any
+        if f_json:
+            # Add -c flag once, followed by all JSON files
+            cmd.append("-c")
+            for json_file in f_json:
+                logger.info(f"Adding custom data from: {self.config.json_path}{json_file}")
+                cmd.append(f"{self.config.json_path}{json_file}")
+            
+        run_command(cmd)
         logger.info("Binary file generated")
 
     def _remove_custom_data(self, f_txt: Optional[str] = None) -> None:
@@ -489,14 +505,25 @@ class EEPROM:
                     
         os.rename(self.temp_text, self.dump_text)
 
-    def update_eeprom(self, f_json: Optional[str] = None, f_setting: Optional[str] = None) -> bool:
-        """Update EEPROM while preserving UUID and other settings."""
+    def update_eeprom(self, f_json: Optional[Union[str, list[str]]] = None, f_setting: Optional[str] = None) -> bool:
+        """Update EEPROM while preserving UUID and other settings.
+        
+        Args:
+            f_json: JSON filename(s). Can be a single filename or list of filenames for multiple
+                   custom data sections. If None, uses serial_number.json or default_config.
+            f_setting: Optional settings template file
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
         serial_number = self.get_serial_number()
+        
+        # Handle default JSON file case
         if f_json is None:
             f_json = f"{serial_number}.json" if serial_number else self.default_config
 
         if f_setting is not None:
-            logger.info(f"Making new binary file using {f_setting} and {f_json} as custom data")
+            logger.info(f"Making new binary file using {f_setting} and custom data from JSON file(s)")
             self._make_eeprom(f_txt=f"{self.config.files_path}{f_setting}", f_json=f_json)
         else:
             logger.info("Removing existing custom data")
