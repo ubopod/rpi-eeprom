@@ -209,7 +209,7 @@ class EEPROM:
         """
         if self.bus_address:
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", "-d=9", "-a=0x50", f"-f={self.binary_readback_file}", "-y", f"-t={self.model}"]
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", "-d=9", f"-f={self.binary_readback_file}", "-y", f"-t={self.model}"]
             )
             run_command(
                 [f"{self.config.tools_path}/eepdump", self.binary_readback_file, self.readback_text_file]
