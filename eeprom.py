@@ -3,12 +3,41 @@ import os
 import random
 import json
 import logging
+import platform
 from typing import Dict, Optional, Tuple, Any, Union
 from dataclasses import dataclass
 from pathlib import Path
-from gpiozero import DigitalOutputDevice
 import subprocess as sp
 from datetime import datetime
+
+# Mock class for non-Raspberry Pi environments
+class MockDigitalOutputDevice:
+    """Mock implementation of gpiozero.DigitalOutputDevice for non-Raspberry Pi environments."""
+    def __init__(self, pin: int):
+        self.pin = pin
+        self._state = False
+        logging.debug(f"Initialized mock GPIO pin {pin}")
+        
+    def on(self) -> None:
+        """Turn the pin on."""
+        self._state = True
+        logging.debug(f"Mock GPIO pin {self.pin} turned ON")
+        
+    def off(self) -> None:
+        """Turn the pin off."""
+        self._state = False
+        logging.debug(f"Mock GPIO pin {self.pin} turned OFF")
+
+# Conditionally import gpiozero or use mock class
+if platform.system() == "Linux" and os.path.exists("/proc/device-tree/model"):
+    try:
+        from gpiozero import DigitalOutputDevice
+    except ImportError:
+        logging.warning("Failed to import gpiozero. Using mock implementation.")
+        DigitalOutputDevice = MockDigitalOutputDevice
+else:
+    logging.info("Non-Raspberry Pi environment detected. Using mock GPIO implementation.")
+    DigitalOutputDevice = MockDigitalOutputDevice
 
 class EEPROMError(Exception):
     """Base exception for EEPROM operations."""
