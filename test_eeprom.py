@@ -46,8 +46,8 @@ import sys
 import json
 import pytest
 from pathlib import Path
-from unittest.mock import patch
-from eeprom import EEPROM, EEPROMConfig, EEPROMError
+from unittest.mock import patch, MagicMock
+from eeprom import EEPROM, EEPROMConfig, EEPROMError, MockDigitalOutputDevice
 
 # Add parent directory to path for imports
 PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -68,28 +68,32 @@ def config(temp_dir):
     return EEPROMConfig(
         tools_path=temp_dir / "tools",
         files_path=temp_dir / "files",
-        json_path=temp_dir / "json"
+        json_path=temp_dir / "json",
+        i2c_bus=9,
+        i2c_address="0x50"
     )
 
 @pytest.fixture
 def mock_gpio():
-    """Mock GPIO device."""
-    with patch('gpiozero.DigitalOutputDevice') as mock:
-        yield mock
+    """Mock GPIO device using our MockDigitalOutputDevice."""
+    # No need to mock since we're using our own mock implementation
+    return MockDigitalOutputDevice
 
 @pytest.fixture
-def eeprom(config, mock_gpio):
-    """Create EEPROM instance with mocked GPIO."""
+def eeprom(config):
+    """Create EEPROM instance with mocked I2C check."""
     with patch('eeprom.EEPROM._check_i2c'):
         return EEPROM(config)
 
 # Unit Tests
 def test_init(eeprom):
     """Test EEPROM initialization."""
-    assert eeprom.model == "24c32"
-    assert eeprom.size_kbytes == 4
+    assert eeprom.config.model == "24c32"
+    assert eeprom.config.size_kbytes == 4
     assert eeprom.serial_number is None
-    assert isinstance(eeprom.binary_file, Path)
+    assert isinstance(eeprom.image_binary, Path)
+    assert eeprom.config.i2c_bus == 9
+    assert eeprom.config.i2c_address == "0x50"
 
 def test_generate_serial_number(eeprom):
     """Test serial number generation."""
@@ -100,14 +104,14 @@ def test_generate_serial_number(eeprom):
 @patch('subprocess.run')
 def test_read_raw_eeprom_no_device(mock_run, eeprom):
     """Test reading EEPROM when no device is present."""
-    eeprom.bus_address = None
+    eeprom.test_result = False
     eeprom._read_raw_eeprom()
     mock_run.assert_not_called()
 
 @patch('subprocess.run')
 def test_read_raw_eeprom_with_device(mock_run, eeprom):
     """Test reading EEPROM when device is present."""
-    eeprom.bus_address = "0x50"
+    eeprom.test_result = True
     mock_run.return_value.returncode = 0
     eeprom._read_raw_eeprom()
     assert mock_run.call_count == 2
@@ -118,6 +122,8 @@ def test_generate_summary(eeprom):
     assert "eeprom" in summary
     assert "serial_number" in summary
     assert summary["eeprom"]["model"] == "24c32"
+    assert summary["eeprom"]["i2c_bus"] == 9
+    assert summary["eeprom"]["i2c_address"] == "0x50"
 
 @patch('builtins.open', create=True)
 def test_parse_eeprom_text_empty(mock_open, eeprom):
@@ -130,19 +136,45 @@ def test_parse_eeprom_text_empty(mock_open, eeprom):
 def test_parse_eeprom_text_valid(mock_file_handler, eeprom):
     """Test parsing valid EEPROM content."""
     mock_file = mock_file_handler.return_value.__enter__.return_value
-    mock_file.readline.side_effect = [
+    # Set up the mock to return lines when iterated over
+    mock_file.__iter__.return_value = [
         "product_uuid 12345678-1234-5678-1234-567812345678\n",
         "product_id 0x1234\n",
         "product_ver 0x1\n",
         'vendor "Test Vendor"\n',
         'product "Test Product"\n',
+        'dt_blob "test_blob"\n',
         "custom_data\n",
         '{"serial_number": "ABC123"}\n',
-        "End of atom\n"
+        "End of atom\n",
+        "custom_data\n",
+        "raw data section\n",
+        "end\n"
     ]
+    # Also set up readline for when it's explicitly called
+    mock_file.readline.side_effect = [
+        '{"serial_number": "ABC123"}\n',
+        "End of atom\n",
+        "raw data section\n",
+        "end\n"
+    ]
+    
     info = eeprom._parse_eeprom_text()
+    
+    # Verify basic EEPROM fields
     assert info["product_uuid"] == "12345678-1234-5678-1234-567812345678"
+    assert info["product_id"] == "0x1234"
+    assert info["product_ver"] == "0x1"
+    assert info["vendor"] == "Test Vendor"
+    assert info["product"] == "Test Product"
+    assert info["dt_blob"] == "test_blob"
+    
+    # Verify custom data sections
+    assert len(info["custom_data_all"]) == 2
+    assert isinstance(info["custom_data"], dict)  # First section should be parsed as JSON
     assert info["custom_data"]["serial_number"] == "ABC123"
+    assert info["custom_data_all"][0]["serial_number"] == "ABC123"
+    assert info["custom_data_all"][1] == "raw data section"  # Second section as raw string
 
 def test_handle_existing_content_blank(eeprom):
     """Test handling blank EEPROM."""
@@ -162,6 +194,26 @@ def test_handle_existing_content_zero_uuid(eeprom):
         assert result is True
         mock_refresh.assert_called_once()
 
+@patch('subprocess.run')
+def test_make_eeprom_multiple_json(mock_run, eeprom):
+    """Test creating EEPROM binary with multiple JSON files."""
+    json_files = ["config1.json", "config2.json"]
+    eeprom._make_eeprom(f_json=json_files)
+    
+    # Check that command was constructed correctly with single -c flag
+    cmd = mock_run.call_args[0][0]
+    assert cmd[0].endswith("eepmake")
+    c_index = cmd.index("-c")
+    assert len(cmd[c_index:]) == 3  # -c and two json files
+    assert all(f.endswith(".json") for f in cmd[c_index+1:])
+
+def test_mock_gpio_operations(eeprom):
+    """Test mock GPIO operations."""
+    eeprom.write_protect.off()
+    assert eeprom.write_protect._state is False
+    eeprom.write_protect.on()
+    assert eeprom.write_protect._state is True
+
 # Main Test Script
 def run_eeprom_test() -> int:
     """Run EEPROM hardware test.
@@ -174,7 +226,7 @@ def run_eeprom_test() -> int:
     try:
         eeprom = EEPROM()
         
-        if not eeprom.bus_address:
+        if not eeprom.test_result:
             print("No EEPROM device detected!")
             return 1
             
