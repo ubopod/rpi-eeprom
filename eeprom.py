@@ -10,6 +10,26 @@ from gpiozero import DigitalOutputDevice
 import subprocess as sp
 from datetime import datetime
 
+class EEPROMError(Exception):
+    """Base exception for EEPROM operations."""
+    pass
+
+class EEPROMConfigError(EEPROMError):
+    """Exception raised when configuration is invalid."""
+    pass
+
+class EEPROMNotFoundError(EEPROMError):
+    """Exception raised when EEPROM is not detected."""
+    pass
+
+class EEPROMWriteError(EEPROMError):
+    """Exception raised when writing to EEPROM fails."""
+    pass
+
+class EEPROMReadError(EEPROMError):
+    """Exception raised when reading from EEPROM fails."""
+    pass
+
 @dataclass
 class EEPROMConfig:
     """Configuration for EEPROM operations."""
@@ -19,14 +39,21 @@ class EEPROMConfig:
     model: str = "24c32"
     size_kbytes: int = 4
     write_protect_pin: int = 16
-    i2c_bus: int = 9
-    i2c_address: str = "0x50"
+    i2c_bus: int = 9  # Default I2C bus number
+    i2c_address: str = "0x50"  # Default I2C device address
 
     def __post_init__(self) -> None:
-        """Ensure directories exist after initialization."""
+        """Ensure directories exist after initialization and validate parameters."""
         self.tools_path.mkdir(parents=True, exist_ok=True)
         self.files_path.mkdir(parents=True, exist_ok=True)
         self.json_path.mkdir(parents=True, exist_ok=True)
+        
+        # Validate I2C parameters
+        if not isinstance(self.i2c_bus, int) or self.i2c_bus < 0:
+            raise EEPROMConfigError(f"Invalid I2C bus number: {self.i2c_bus}")
+            
+        if not isinstance(self.i2c_address, str) or not self.i2c_address.startswith("0x"):
+            raise EEPROMConfigError(f"Invalid I2C address format: {self.i2c_address}")
 
 # Configure logging
 logging.basicConfig(
@@ -44,23 +71,9 @@ DEFAULT_CONFIG = EEPROMConfig(
     tools_path=Path('/usr/local/bin'),
     files_path=Path('./'),
     json_path=Path('./'),
+    i2c_bus=9,
+    i2c_address="0x50"
 )
-
-class EEPROMError(Exception):
-    """Base exception for EEPROM operations."""
-    pass
-
-class EEPROMNotFoundError(EEPROMError):
-    """Exception raised when EEPROM is not detected."""
-    pass
-
-class EEPROMWriteError(EEPROMError):
-    """Exception raised when writing to EEPROM fails."""
-    pass
-
-class EEPROMReadError(EEPROMError):
-    """Exception raised when reading from EEPROM fails."""
-    pass
 
 def run_command(cmd: list[str], check: bool = True, **kwargs) -> sp.CompletedProcess:
     """Run a shell command safely.
@@ -102,20 +115,19 @@ class EEPROM:
         self.info: Dict[str, Any] = {}
         self.summary: Dict[str, Any] = {}
         self.serial_number: Optional[str] = None
-        self.bus_address: Optional[str] = None
         self.test_result: bool = False
-        self.model: str = self.config.model
-        self.size_kbytes: int = self.config.size_kbytes
         
-        # File paths
-        self.binary_file = self.config.files_path / "eeprom.eep"
-        self.binary_readback_file = self.config.files_path / "eeprom_readback.eep"
-        self.text_file = "eeprom_settings.txt"
-        self.readback_text_file = self.config.files_path / "eeprom_readback.txt"
-        self.json_file = "test_summary.json"
-        self.temp_readback = self.config.files_path / "temp_readback.txt"
-        self.blank_readback_file = self.config.files_path / "blank_readback.eep"
-        self.blank_file = self.config.files_path / "blank.eep"
+        # Binary files for EEPROM operations
+        self.image_binary = self.config.files_path / "eeprom_image.eep"  # Binary ready to flash
+        self.readback_binary = self.config.files_path / "eeprom_readback.eep"  # Raw EEPROM content
+        self.blank_binary = self.config.files_path / "blank.eep"  # For reset
+        self.blank_readback_binary = self.config.files_path / "blank_readback.eep"  # Verify reset
+        
+        # Text and configuration files
+        self.template_text = self.config.files_path / "eeprom_template.txt"  # Base settings
+        self.dump_text = self.config.files_path / "eeprom_dump.txt"  # Human readable dump
+        self.temp_text = self.config.files_path / "temp_dump.txt"  # For processing
+        self.default_config = "default_config.json"  # Default JSON config
         
         # GPIO setup
         self.write_protect = DigitalOutputDevice(self.config.write_protect_pin)
@@ -127,14 +139,14 @@ class EEPROM:
     def _clean_files(self) -> None:
         """Internal method to clean up temporary files."""
         try:
-            os.remove(self.readback_text_file)
+            os.remove(self.dump_text)
+        except OSError as error:
+            logger.warning(f"Error removing dump file: {error}")
+            logger.debug("eeprom_dump.txt not found!")
+        try:
+            os.remove(self.readback_binary)
         except OSError as error:
             logger.warning(f"Error removing readback file: {error}")
-            logger.debug("eeprom_readback.txt not found!")
-        try:
-            os.remove(self.binary_readback_file)
-        except OSError as error:
-            logger.warning(f"Error removing binary readback file: {error}")
             logger.debug("eeprom_readback.eep not found!")
 
 
@@ -163,13 +175,11 @@ class EEPROM:
 
     def _check_i2c(self) -> None:
         """Internal method to check if EEPROM is detected on I2C bus."""
-        if (os.system("i2cdetect -y 9 | grep '50: 50'") == 0):
+        if (os.system(f"i2cdetect -y {self.config.i2c_bus} | grep '{self.config.i2c_address[2:]}:'") == 0):
             logger.info("EEPROM detected!")
-            self.bus_address = "0x50"
             self.test_result = True
         else:
             logger.warning("No EEPROM detected!")
-            self.bus_address = None
             self.test_result = False
 
     def generate_serial_number(self) -> str:
@@ -185,8 +195,9 @@ class EEPROM:
         """Generate a summary for the EEPROM."""
         summary: Dict[str, Any] = {
             "eeprom": {
-                "model": self.model,
-                "bus_address": self.bus_address,
+                "model": self.config.model,
+                "i2c_bus": self.config.i2c_bus,
+                "i2c_address": self.config.i2c_address,
                 "test_result": self.test_result
             },
             "serial_number": self.generate_serial_number()
@@ -195,29 +206,18 @@ class EEPROM:
         return summary
 
     def _read_raw_eeprom(self) -> None:
-        """Internal method to read raw binary data from EEPROM hardware.
-        
-        This is a low-level function that:
-        1. Reads binary data directly from EEPROM hardware using eepflash.sh
-        2. Saves the binary data to binary_readback_file
-        3. Converts binary to human-readable format in readback_text_file
-        
-        This method should not be called directly. Use read_eeprom_content() instead.
-        
-        Raises:
-            EEPROMError: If EEPROM is not detected or read fails
-        """
-        if self.bus_address:
+        """Internal method to read raw binary data from EEPROM hardware."""
+        if self.test_result:
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", "-d=9", f"-f={self.binary_readback_file}", "-y", f"-t={self.model}"]
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", f"-d={self.config.i2c_bus}", "-a={self.config.i2c_address}", f"-f={self.readback_binary}", "-y", f"-t={self.config.model}"]
             )
             run_command(
-                [f"{self.config.tools_path}/eepdump", self.binary_readback_file, self.readback_text_file]
+                [f"{self.config.tools_path}/eepdump", self.readback_binary, self.dump_text]
             )
         else:
             logger.error("No EEPROM is detected!")
 
-    def _parse_eeprom_text(self, filename: str = "eeprom_readback.txt") -> Dict[str, Any]:
+    def _parse_eeprom_text(self, filename: str = "eeprom_dump.txt") -> Dict[str, Any]:
         """Internal method to parse the human-readable EEPROM text file.
         
         This is an internal helper function that parses the text dump of EEPROM content.
@@ -230,14 +230,14 @@ class EEPROM:
         This method should not be called directly. Use read_eeprom_content() instead.
         
         Args:
-            filename: Name of the text file to parse (default: eeprom_readback.txt)
+            filename: Name of the text file to parse (default: eeprom_dump.txt)
             
         Returns:
             Dict containing structured EEPROM data
         """
         info: Dict[str, Any] = {}
         try:
-            with open(self.readback_text_file, "r") as myfile:
+            with open(self.dump_text, "r") as myfile:
                 for line in myfile:
                     line = line.strip()
                     if not line:
@@ -348,7 +348,7 @@ class EEPROM:
         """
         serial_number = self.get_serial_number()
         if not f_json:
-            f_json = f"{serial_number}.json" if serial_number else self.json_file
+            f_json = f"{serial_number}.json" if serial_number else self.default_config
 
         try:
             with open(f"{self.config.json_path}{f_json}", "r") as read_file:
@@ -368,26 +368,26 @@ class EEPROM:
             
             logger.info("Making blank binary file")
             run_command(
-                ["dd", "if=/dev/zero", "ibs=1k", f"count={self.size_kbytes}", f"of={self.blank_file}"]
+                ["dd", "if=/dev/zero", "ibs=1k", f"count={self.config.size_kbytes}", f"of={self.blank_binary}"]
             )
             
             logger.info("Writing blank binary file to EEPROM")
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", "-d=9", f"-f={self.blank_file}", "-y", f"-t={self.model}"]
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", f"-d={self.config.i2c_bus}", "-a={self.config.i2c_address}", f"-f={self.blank_binary}", "-y", f"-t={self.config.model}"]
             )
             
             time.sleep(0.5)
             
             logger.info("Verifying blank state")
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", "-d=9", f"-f={self.blank_readback_file}", "-y", f"-t={self.model}"]
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", f"-d={self.config.i2c_bus}", "-a={self.config.i2c_address}", f"-f={self.blank_readback_binary}", "-y", f"-t={self.config.model}"]
             )
             
-            with open(self.blank_readback_file, "rb") as f:
+            with open(self.blank_readback_binary, "rb") as f:
                 content: bytes = f.read()
                 if any(byte != 0 for byte in content):
                     logger.error("EEPROM verification failed - not blank!")
-                    self.bus_address = None
+                    self.test_result = False
                     return False
                     
             logger.info("EEPROM successfully blanked and verified")
@@ -395,11 +395,7 @@ class EEPROM:
             
         except sp.CalledProcessError as e:
             logger.error(f"Command failed with error: {e.stderr}")
-            self.bus_address = None
-            return False
-        except Exception as e:
-            logger.error(f"Error during EEPROM reset: {e}")
-            self.bus_address = None
+            self.test_result = False
             return False
         finally:
             self.write_protect.on()
@@ -408,9 +404,9 @@ class EEPROM:
     def write_eeprom(self, f_bin: Optional[str] = None) -> bool:
         """Write the binary file to the EEPROM."""
         if not f_bin:
-            f_bin = self.binary_file
+            f_bin = self.image_binary
         
-        if not self.bus_address:
+        if not self.test_result:
             logger.error("No EEPROM is detected!")
             return False
 
@@ -424,12 +420,12 @@ class EEPROM:
 
             logger.info(f"Writing binary file: {f_bin}")
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", "-d=9", f"-f={f_bin}", "-y", f"-t={self.model}"]
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", f"-d={self.config.i2c_bus}", "-a={self.config.i2c_address}", f"-f={f_bin}", "-y", f"-t={self.config.model}"]
             )
             
             logger.info("Reading back binary file for verification")
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", "-d=9", f"-f={self.binary_readback_file}", "-y", f"-t={self.model}"]
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", f"-d={self.config.i2c_bus}", "-a={self.config.i2c_address}", f"-f={self.readback_binary}", "-y", f"-t={self.config.model}"]
             )
 
             return True
@@ -443,38 +439,38 @@ class EEPROM:
     def _make_eeprom(self, f_txt: Optional[str] = None, f_json: Optional[str] = None) -> None:
         """Internal method to create EEPROM binary file from text and JSON inputs."""
         if not f_txt:
-            f_txt = self.config.files_path / self.text_file
+            f_txt = self.config.files_path / self.template_text
         if not f_json:
-            f_json = self.json_file
+            f_json = self.default_config
 
         logger.info("Making eeprom binary file")
         logger.info(f"Settings file: {f_txt}")
         logger.info(f"JSON data file: {self.config.json_path}{f_json}")
         
         run_command(
-            [f"{self.config.tools_path}/eepmake", "-v1", f_txt, self.binary_file, "-c", f"{self.config.json_path}{f_json}"]
+            [f"{self.config.tools_path}/eepmake", "-v1", f_txt, self.image_binary, "-c", f"{self.config.json_path}{f_json}"]
         )
         logger.info("Binary file generated")
 
     def _remove_custom_data(self, f_txt: Optional[str] = None) -> None:
         """Internal method to remove custom data section from EEPROM text file."""
         if f_txt is None:
-            f_txt = self.readback_text_file
+            f_txt = self.dump_text
             
-        with open(self.temp_readback, "w") as write_file:
+        with open(self.temp_text, "w") as write_file:
             with open(f_txt, "r") as read_file:
                 for line in read_file:
                     if "Start of atom #2" in line or "Start of atom #3" in line:
                         break
                     write_file.write(line)
                     
-        os.rename(self.temp_readback, self.readback_text_file)
+        os.rename(self.temp_text, self.dump_text)
 
     def update_eeprom(self, f_json: Optional[str] = None, f_setting: Optional[str] = None) -> bool:
         """Update EEPROM while preserving UUID and other settings."""
         serial_number = self.get_serial_number()
         if f_json is None:
-            f_json = f"{serial_number}.json" if serial_number else self.json_file
+            f_json = f"{serial_number}.json" if serial_number else self.default_config
 
         if f_setting is not None:
             logger.info(f"Making new binary file using {f_setting} and {f_json} as custom data")
@@ -483,7 +479,7 @@ class EEPROM:
             logger.info("Removing existing custom data")
             self._remove_custom_data()
             logger.info("Making EEPROM binary image with new custom data")
-            self._make_eeprom(f_txt=self.readback_text_file, f_json=f_json)
+            self._make_eeprom(f_txt=self.dump_text, f_json=f_json)
 
         logger.info("Writing new binary file to EEPROM")
         if not self.write_eeprom():
@@ -527,15 +523,16 @@ class EEPROM:
             
         custom_data['serial_number'] = serial_number
         custom_data['eeprom'] = {
-            'model': self.model,
-            'bus_address': self.bus_address,
+            'model': self.config.model,
+            'i2c_bus': self.config.i2c_bus,
+            'i2c_address': self.config.i2c_address,
             'test_result': self.test_result
         }
         
         self.update_json(summary=custom_data, f_json=f"{serial_number}.json")
         return self.update_eeprom(f_json=f"{serial_number}.json")
 
-    def refresh(self, settings_file: str = "eeprom_settings.txt") -> bool:
+    def refresh(self, settings_file: str = "eeprom_template.txt") -> bool:
         """Refresh EEPROM with new content.
         
         This operation will:
@@ -562,10 +559,10 @@ class EEPROM:
         try:
             # Read current content
             self._read_raw_eeprom()
-            if self.binary_readback_file.exists():
+            if self.readback_binary.exists():
                 import shutil
-                shutil.copy(self.binary_readback_file, backup_binary)
-                shutil.copy(self.readback_text_file, backup_text)
+                shutil.copy(self.readback_binary, backup_binary)
+                shutil.copy(self.dump_text, backup_text)
                 logger.info("Backup created successfully")
             else:
                 logger.warning("No existing content to backup")
@@ -596,7 +593,7 @@ class EEPROM:
                     # Disable write protect for restore
                     self.write_protect.off()
                     run_command(
-                        ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", "-d=9", f"-f={backup_binary}", "-y", f"-t={self.model}"]
+                        ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", f"-d={self.config.i2c_bus}", "-a={self.config.i2c_address}", f"-f={backup_binary}", "-y", f"-t={self.config.model}"]
                     )
                     logger.info("Backup restored successfully")
                 except Exception as restore_error:
@@ -621,7 +618,7 @@ class EEPROM:
                     metadata = {
                         "timestamp": timestamp,
                         "serial_number": self.serial_number,
-                        "model": self.model,
+                        "model": self.config.model,
                         "settings_file": str(settings_file)
                     }
                     metadata_file = backup_dir / f"eeprom_backup_{timestamp}_meta.json"
@@ -662,8 +659,9 @@ class EEPROM:
         if serial_number:
             logger.info(f"Found existing serial number: {serial_number}")
             custom_data['eeprom'] = {
-                'model': self.model,
-                'bus_address': self.bus_address,
+                'model': self.config.model,
+                'i2c_bus': self.config.i2c_bus,
+                'i2c_address': self.config.i2c_address,
                 'test_result': self.test_result
             }
             self.update_json(summary=custom_data, f_json=f"{serial_number}.json")
