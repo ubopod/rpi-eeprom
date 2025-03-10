@@ -368,25 +368,19 @@ class EEPROM:
             
             logger.info("Making blank binary file")
             run_command(
-                ["dd", "if=/dev/zero", "ibs=1k", f"count={self.size_kbytes}", f"of={self.blank_file}"],
-                capture_output=True,
-                text=True
+                ["dd", "if=/dev/zero", "ibs=1k", f"count={self.size_kbytes}", f"of={self.blank_file}"]
             )
             
             logger.info("Writing blank binary file to EEPROM")
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", "-d=9", f"-f={self.blank_file}", "-y", f"-t={self.model}"],
-                capture_output=True,
-                text=True
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", "-d=9", f"-f={self.blank_file}", "-y", f"-t={self.model}"]
             )
             
             time.sleep(0.5)
             
             logger.info("Verifying blank state")
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", "-d=9", f"-f={self.blank_readback_file}", "-y", f"-t={self.model}"],
-                capture_output=True,
-                text=True
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", "-d=9", f"-f={self.blank_readback_file}", "-y", f"-t={self.model}"]
             )
             
             with open(self.blank_readback_file, "rb") as f:
