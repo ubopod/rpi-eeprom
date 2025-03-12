@@ -198,27 +198,35 @@ def main() -> int:
                 try:
                     json_files = []
                     if args.append:
-                        # Read current content to preserve first custom data section
+                        # Read current content to preserve all existing custom data sections
                         info = eeprom.read_eeprom_content()
                         if not info:
                             logger.error("Failed to read current EEPROM content for append operation")
                             return 1
                             
-                        if "custom_data" not in info:
+                        if "custom_data_all" not in info:
                             logger.warning("No existing custom data found to append to")
                         else:
-                            # Save current custom data to a temporary file
-                            temp_json = eeprom.config.json_path / "temp_current.json"
-                            try:
-                                with open(temp_json, "w") as f:
-                                    if isinstance(info["custom_data"], dict):
-                                        json.dump(info["custom_data"], f)
-                                    else:
-                                        json.dump({"data": info["custom_data"]}, f)
-                                json_files.append(str(temp_json))
-                            except Exception as e:
-                                logger.error(f"Failed to save current custom data: {e}")
-                                return 1
+                            # Save all existing custom data sections to temporary files
+                            for i, section in enumerate(info["custom_data_all"]):
+                                temp_json = eeprom.config.json_path / f"temp_current_{i}.json"
+                                try:
+                                    with open(temp_json, "w") as f:
+                                        if isinstance(section, dict):
+                                            json.dump(section, f)
+                                        else:
+                                            json.dump({"data": section}, f)
+                                    json_files.append(str(temp_json))
+                                except Exception as e:
+                                    logger.error(f"Failed to save custom data section {i}: {e}")
+                                    # Clean up any temporary files created so far
+                                    for tmp_file in json_files:
+                                        if "temp_current_" in tmp_file:
+                                            try:
+                                                os.remove(tmp_file)
+                                            except OSError:
+                                                pass
+                                    return 1
                     
                     # Validate and add new JSON files
                     for json_file in args.json_file:
@@ -236,14 +244,22 @@ def main() -> int:
                     # Update EEPROM with all custom data sections
                     if eeprom.update_eeprom(f_json=json_files):
                         logger.info("Successfully updated EEPROM with custom data")
-                        # Clean up temporary file if it was created
-                        if args.append and "temp_json" in locals():
-                            try:
-                                os.remove(temp_json)
-                            except OSError as e:
-                                logger.warning(f"Failed to remove temporary file: {e}")
+                        # Clean up temporary files
+                        for tmp_file in json_files:
+                            if "temp_current_" in str(tmp_file):
+                                try:
+                                    os.remove(tmp_file)
+                                except OSError as e:
+                                    logger.warning(f"Failed to remove temporary file {tmp_file}: {e}")
                         return 0
                     logger.error("Failed to update EEPROM")
+                    # Clean up temporary files on failure
+                    for tmp_file in json_files:
+                        if "temp_current_" in str(tmp_file):
+                            try:
+                                os.remove(tmp_file)
+                            except OSError:
+                                pass
                     return 1
                 except Exception as e:
                     logger.error(f"Unexpected error while handling JSON files: {e}")
