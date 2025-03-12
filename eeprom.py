@@ -278,7 +278,7 @@ class EEPROM:
                             data_line = myfile.readline().strip()
                             if not data_line:
                                 continue
-                            if data_line.endswith('\"'):  # Found closing quote
+                            if data_line.endswith('\\\"'):  # Found closing quote
                                 json_lines.append(data_line[:-1])  # Remove closing quote
                                 break
                             json_lines.append(data_line)
