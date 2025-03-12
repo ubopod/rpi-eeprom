@@ -286,9 +286,12 @@ class EEPROM:
                         if json_lines:
                             try:
                                 # Join lines and parse as JSON
-                                json_str = ''.join(json_lines)
+                                json_str = ''.join(json_lines).strip()
+                                # Remove any remaining quotes at start/end
+                                json_str = json_str.strip('"')
                                 logger.debug(f"Parsing JSON data: {json_str}")
-                                custom_data_sections.append(json.loads(json_str))
+                                parsed_data = json.loads(json_str)
+                                custom_data_sections.append(parsed_data)
                                 logger.info("Successfully parsed custom data section")
                             except json.JSONDecodeError as e:
                                 logger.error(f"Failed to parse custom data as JSON: {e}")

@@ -173,7 +173,7 @@ def main() -> int:
                     args.output.parent.mkdir(parents=True, exist_ok=True)
                     
                     with open(args.output, 'w') as f:
-                        json.dump(data, f, indent=2)
+                        json.dump(data, f, indent=2, sort_keys=True)
                     logger.info(f"Successfully saved EEPROM content to {args.output}")
                 except OSError as e:
                     logger.error(f"Failed to write to output file: {e}")
@@ -181,10 +181,16 @@ def main() -> int:
             
             # Display output
             if args.json:
-                logger.info("\n" + json.dumps(data, indent=2))
+                # Format the output nicely
+                formatted_json = json.dumps(data, indent=2, sort_keys=True)
+                logger.info("\n" + formatted_json)
             else:
-                for key, value in data.items():
-                    logger.info(f"{key}: {value}")
+                for key, value in sorted(data.items()):
+                    if isinstance(value, (dict, list)):
+                        formatted_value = json.dumps(value, indent=2)
+                        logger.info(f"{key}:\n{formatted_value}")
+                    else:
+                        logger.info(f"{key}: {value}")
             return 0
             
         elif args.command == "write":
