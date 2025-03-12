@@ -144,19 +144,19 @@ def test_parse_eeprom_text_valid(mock_file_handler, eeprom):
         'vendor "Test Vendor"\n',
         'product "Test Product"\n',
         'dt_blob "test_blob"\n',
-        "custom_data\n",
+        "custom_data \"\n",
         '{"serial_number": "ABC123"}\n',
-        "End of atom\n",
-        "custom_data\n",
-        "raw data section\n",
-        "end\n"
+        "\\\"\n",
+        "custom_data \"\n",
+        '{"key": "value"}\n',
+        "\\\"\n",
     ]
     # Also set up readline for when it's explicitly called
     mock_file.readline.side_effect = [
         '{"serial_number": "ABC123"}\n',
-        "End of atom\n",
-        "raw data section\n",
-        "end\n"
+        "\\\"\n",
+        '{"key": "value"}\n',
+        "\\\"\n",
     ]
     
     info = eeprom._parse_eeprom_text()
@@ -174,7 +174,7 @@ def test_parse_eeprom_text_valid(mock_file_handler, eeprom):
     assert isinstance(info["custom_data"], dict)  # First section should be parsed as JSON
     assert info["custom_data"]["serial_number"] == "ABC123"
     assert info["custom_data_all"][0]["serial_number"] == "ABC123"
-    assert info["custom_data_all"][1] == "raw data section"  # Second section as raw string
+    assert info["custom_data_all"][1]["key"] == "value"  # Second section as raw string
 
 def test_handle_existing_content_blank(eeprom):
     """Test handling blank EEPROM."""
