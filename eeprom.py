@@ -288,14 +288,15 @@ class EEPROM:
                                 # Join lines and parse as JSON
                                 json_str = ''.join(json_lines).strip()
                                 # Remove any remaining quotes at start/end
+                                logger.info(f"JSON data before stripping: {json_str}")
                                 json_str = json_str.strip('"')
-                                logger.debug(f"Parsing JSON data: {json_str}")
+                                logger.info(f"Parsing JSON data: {json_str}")
                                 parsed_data = json.loads(json_str)
                                 custom_data_sections.append(parsed_data)
                                 logger.info("Successfully parsed custom data section")
                             except json.JSONDecodeError as e:
                                 logger.error(f"Failed to parse custom data as JSON: {e}")
-                                logger.debug(f"Raw data that failed to parse: {json_str}")
+                                logger.info(f"Raw data that failed to parse: {json_str}")
                                 custom_data_sections.append(json_str)
                             
         except OSError as error:
