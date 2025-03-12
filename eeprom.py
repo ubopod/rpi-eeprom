@@ -238,7 +238,7 @@ class EEPROM:
         """Internal method to read raw binary data from EEPROM hardware."""
         if self.test_result:
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", f"-d={self.config.i2c_bus}", f"-a={self.config.i2c_address}", f"-f={self.readback_binary}", "-y", f"-t={self.config.model}"]
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", f"-d={self.config.i2c_bus}", f"-a={self.config.i2c_address[2:]}", f"-f={self.readback_binary}", "-y", f"-t={self.config.model}"]
             )
             run_command(
                 [f"{self.config.tools_path}/eepdump", self.readback_binary, self.dump_text]
@@ -425,14 +425,14 @@ class EEPROM:
             
             logger.info("Writing blank binary file to EEPROM")
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", f"-d={self.config.i2c_bus}", f"-a={self.config.i2c_address}", f"-f={self.blank_binary}", "-y", f"-t={self.config.model}"]
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", f"-d={self.config.i2c_bus}", f"-a={self.config.i2c_address[2:]}", f"-f={self.blank_binary}", "-y", f"-t={self.config.model}"]
             )
             
             time.sleep(0.5)
             
             logger.info("Verifying blank state")
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", f"-d={self.config.i2c_bus}", f"-a={self.config.i2c_address}", f"-f={self.blank_readback_binary}", "-y", f"-t={self.config.model}"]
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", f"-d={self.config.i2c_bus}", f"-a={self.config.i2c_address[2:]}", f"-f={self.blank_readback_binary}", "-y", f"-t={self.config.model}"]
             )
             
             with open(self.blank_readback_binary, "rb") as f:
@@ -472,12 +472,12 @@ class EEPROM:
 
             logger.info(f"Writing binary file: {f_bin}")
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", f"-d={self.config.i2c_bus}", f"-a={self.config.i2c_address}", f"-f={f_bin}", "-y", f"-t={self.config.model}"]
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", f"-d={self.config.i2c_bus}", f"-a={self.config.i2c_address[2:]}", f"-f={f_bin}", "-y", f"-t={self.config.model}"]
             )
             
             logger.info("Reading back binary file for verification")
             run_command(
-                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", f"-d={self.config.i2c_bus}", f"-a={self.config.i2c_address}", f"-f={self.readback_binary}", "-y", f"-t={self.config.model}"]
+                ["sudo", f"{self.config.tools_path}/eepflash.sh", "-r", f"-d={self.config.i2c_bus}", f"-a={self.config.i2c_address[2:]}", f"-f={self.readback_binary}", "-y", f"-t={self.config.model}"]
             )
 
             return True
@@ -672,7 +672,7 @@ class EEPROM:
                     # Disable write protect for restore
                     self.write_protect.off()
                     run_command(
-                        ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", f"-d={self.config.i2c_bus}", f"-a={self.config.i2c_address}", f"-f={backup_binary}", "-y", f"-t={self.config.model}"]
+                        ["sudo", f"{self.config.tools_path}/eepflash.sh", "-w", f"-d={self.config.i2c_bus}", f"-a={self.config.i2c_address[2:]}", f"-f={backup_binary}", "-y", f"-t={self.config.model}"]
                     )
                     logger.info("Backup restored successfully")
                 except Exception as restore_error:
