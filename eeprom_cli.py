@@ -3,13 +3,13 @@
 
 This tool provides a command-line interface for managing EEPROM content, including:
 - Reading EEPROM content (both raw directly from EEPROM and from device tree)
-- Writing custom data to EEPROM
+- Writing custom data to EEPROM (supports both JSON and YAML formats)
 - Updating serial numbers
 - Managing multiple custom data sections
 - Resetting EEPROM to blank state
 
 Configuration:
-    The tool can be configured using a JSON configuration file that specifies:
+    The tool can be configured using a JSON/YAML configuration file that specifies:
     - EEPROM model and size
     - I2C bus and address
     - File paths for tools and data
@@ -30,29 +30,29 @@ Configuration:
     All fields are optional and will use defaults if not specified.
 
 Examples:
-    1. Replace all custom data sections with a new one:
-        $ eeprom_cli.py write -j new_data.json
+    1. Replace all custom data sections with a new one (JSON):
+        $ eeprom_cli.py write -d new_data.json
         
-    2. Replace with multiple custom data sections:
-        $ eeprom_cli.py write -j section1.json -j section2.json
+    2. Replace with multiple custom data sections (mix of JSON/YAML):
+        $ eeprom_cli.py write -d section1.json -d section2.yaml
         
-    3. Preserve existing first section and add a new one:
-        $ eeprom_cli.py write -j new_section.json --append
+    3. Preserve existing sections and add a new one (YAML):
+        $ eeprom_cli.py write -d new_section.yaml --append
         
     4. Preserve first section and add multiple new ones:
-        $ eeprom_cli.py write -j second.json -j third.json --append
+        $ eeprom_cli.py write -d second.json -d third.yaml --append
         
     5. Read EEPROM content in JSON format:
-        $ eeprom_cli.py read --json
+        $ eeprom_cli.py read --format json
         
-    6. Save EEPROM content to a file:
-        $ eeprom_cli.py read --output eeprom_data.json
+    6. Read EEPROM content in YAML format:
+        $ eeprom_cli.py read --format yaml
         
-    7. Read and save device tree content:
+    7. Save EEPROM content to a file (format determined by extension):
+        $ eeprom_cli.py read --output eeprom_data.yaml
+        
+    8. Read and save device tree content:
         $ eeprom_cli.py read --device-tree --output dt_data.json
-        
-    8. Display and save EEPROM content in JSON format:
-        $ eeprom_cli.py read --json --output eeprom_data.json
         
     9. Update serial number:
         $ eeprom_cli.py write --serial ABC123XYZ
@@ -61,12 +61,12 @@ Examples:
         $ eeprom_cli.py reset --settings my_settings.txt
         
     11. Use custom configuration:
-        $ eeprom_cli.py -c config.json write -j data.json
+        $ eeprom_cli.py -c config.yaml write -d data.json
 
 Options:
     --verbose, -v    Enable verbose logging
     --force, -f      Force operations even with existing content
-    --config, -c     Path to configuration file
+    --config, -c     Path to configuration file (JSON/YAML)
     --settings, -s   Path to EEPROM settings file (default: eeprom_settings.txt)
 
 Commands:
@@ -80,6 +80,7 @@ For more detailed help on each command:
 
 import sys
 import json
+import yaml  # For YAML support
 import argparse
 import logging
 from pathlib import Path
@@ -105,22 +106,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="EEPROM Management Tool")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
     parser.add_argument("--force", "-f", action="store_true", help="Force operations even with existing content")
-    parser.add_argument("--config", "-c", type=Path, help="Path to configuration file")
+    parser.add_argument("--config", "-c", type=Path, help="Path to configuration file (JSON/YAML)")
     parser.add_argument("--settings", "-s", type=str, default="eeprom_settings.txt", help="Path to EEPROM settings file")
     
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
     
     # Read command
     read_parser = subparsers.add_parser("read", help="Read EEPROM content")
-    read_parser.add_argument("--json", "-j", action="store_true", help="Output in JSON format")
+    read_parser.add_argument("--format", "-f", choices=["json", "yaml"], default="json", help="Output format (json or yaml)")
     read_parser.add_argument("--device-tree", "-d", action="store_true", help="Read from device tree instead of EEPROM")
-    read_parser.add_argument("--output", "-o", type=Path, help="Save output to JSON file")
+    read_parser.add_argument("--output", "-o", type=Path, help="Save output to file (format determined by extension)")
     
     # Write command
     write_parser = subparsers.add_parser("write", help="Write to EEPROM")
     write_parser.add_argument("--serial", "-s", type=str, help="Serial number to write")
-    write_parser.add_argument("--json-file", "-j", type=Path, action="append", help="JSON file(s) containing custom data to write. Can be specified multiple times for multiple sections.")
-    write_parser.add_argument("--append", "-a", action="store_true", help="Append new JSON data while preserving existing custom data")
+    write_parser.add_argument("--data", "-d", type=Path, action="append", help="Data file(s) to write (JSON/YAML). Can be specified multiple times for multiple sections.")
+    write_parser.add_argument("--append", "-a", action="store_true", help="Append new data while preserving existing custom data")
     
     # Reset command
     subparsers.add_parser("reset", help="Reset EEPROM to blank state")
@@ -141,9 +142,17 @@ def main() -> int:
         if args.config:
             try:
                 with open(args.config) as f:
-                    config_data = json.load(f)
+                    # Try JSON first, then YAML
+                    try:
+                        config_data = json.load(f)
+                    except json.JSONDecodeError:
+                        try:
+                            config_data = yaml.safe_load(f)
+                        except yaml.YAMLError as e:
+                            logger.error(f"Config file is neither valid JSON nor YAML: {e}")
+                            return 1
                     config = EEPROMConfig(**config_data)
-            except (json.JSONDecodeError, OSError) as e:
+            except OSError as e:
                 logger.error(f"Failed to load config file: {e}")
                 return 1
         
@@ -172,29 +181,33 @@ def main() -> int:
                     # Create parent directories if they don't exist
                     args.output.parent.mkdir(parents=True, exist_ok=True)
                     
+                    # Determine format from file extension or --format flag
+                    output_format = args.format
+                    if args.output.suffix.lower() in ['.yaml', '.yml']:
+                        output_format = 'yaml'
+                    elif args.output.suffix.lower() == '.json':
+                        output_format = 'json'
+                    
                     with open(args.output, 'w') as f:
-                        json.dump(data, f, indent=2, sort_keys=True)
+                        if output_format == 'yaml':
+                            yaml.dump(data, f, default_flow_style=False, sort_keys=True)
+                        else:
+                            json.dump(data, f, indent=2, sort_keys=True)
                     logger.info(f"Successfully saved EEPROM content to {args.output}")
                 except OSError as e:
                     logger.error(f"Failed to write to output file: {e}")
                     return 1
             
             # Display output
-            if args.json:
-                # Format the output nicely
-                formatted_json = json.dumps(data, indent=2, sort_keys=True)
-                logger.info("\n" + formatted_json)
+            if args.format == 'yaml':
+                formatted_output = yaml.dump(data, default_flow_style=False, sort_keys=True)
             else:
-                for key, value in sorted(data.items()):
-                    if isinstance(value, (dict, list)):
-                        formatted_value = json.dumps(value, indent=2)
-                        logger.info(f"{key}:\n{formatted_value}")
-                    else:
-                        logger.info(f"{key}: {value}")
+                formatted_output = json.dumps(data, indent=2, sort_keys=True)
+            logger.info("\n" + formatted_output)
             return 0
             
         elif args.command == "write":
-            if args.json_file:
+            if args.data:  # Renamed from args.json_file to args.data
                 try:
                     json_files = []
                     if args.append:
@@ -228,17 +241,26 @@ def main() -> int:
                                                 pass
                                     return 1
                     
-                    # Validate and add new JSON files
-                    for json_file in args.json_file:
+                    # Validate and add new data files
+                    for data_file in args.data:
                         try:
-                            with open(json_file) as f:
-                                logger.info(f"Loaded custom data from {json_file}")
-                            json_files.append(str(json_file))
-                        except json.JSONDecodeError as e:
-                            logger.error(f"Invalid JSON in {json_file}: {e}")
-                            return 1
+                            with open(data_file) as f:
+                                content = f.read()
+                                # Try parsing as JSON first
+                                try:
+                                    json.loads(content)  # Just validate, don't store the result
+                                    logger.info(f"Validated {data_file} as JSON")
+                                except json.JSONDecodeError:
+                                    # Try parsing as YAML
+                                    try:
+                                        yaml.safe_load(content)  # Just validate, don't store the result
+                                        logger.info(f"Validated {data_file} as YAML")
+                                    except yaml.YAMLError as e:
+                                        logger.error(f"File {data_file} is neither valid JSON nor YAML: {e}")
+                                        return 1
+                            json_files.append(str(data_file))
                         except OSError as e:
-                            logger.error(f"Failed to read {json_file}: {e}")
+                            logger.error(f"Failed to read {data_file}: {e}")
                             return 1
                     
                     # Update EEPROM with all custom data sections
@@ -262,7 +284,7 @@ def main() -> int:
                                 pass
                     return 1
                 except Exception as e:
-                    logger.error(f"Unexpected error while handling JSON files: {e}")
+                    logger.error(f"Unexpected error while handling data files: {e}")
                     if args.verbose:
                         logger.exception("Detailed error information:")
                     return 1
@@ -277,7 +299,7 @@ def main() -> int:
                 return 1
             
             # If no specific write operation was requested
-            if not (args.json_file or args.serial):
+            if not (args.data or args.serial):
                 info = eeprom.read_eeprom_content()
                 if not info:
                     logger.error("Failed to read current EEPROM content")
