@@ -37,10 +37,20 @@ product_ver 0x0001
 vendor "Ubo Technology Company"
 
 # ASCII product string (max 255 characters)
-product "Ubo HAT"
+product "Ubo HAT+"
 
 # Custom binary data
-SOMECUSTOMINFORMATIONHERE
+custom_data "
+{
+    "eeprom": {
+        "model": "24c32",
+        "bus_address": "0x50",
+        "test_result": true
+    },
+    "serial_number": "ZF64JA81VPPZ",
+}
+\"
+
 ```
 For more information, checkout EEPROM repo here.
 
