@@ -42,25 +42,28 @@ Examples:
     4. Preserve first section and add multiple new ones:
         $ eeprom_cli.py write -d second.json -d third.yaml --append
         
-    5. Read EEPROM content in JSON format:
+    5. Replace specific custom data section by index:
+        $ eeprom_cli.py write -d new_section.yaml --index 1  # Replace second section
+        
+    6. Read EEPROM content in JSON format:
         $ eeprom_cli.py read --format json
         
-    6. Read EEPROM content in YAML format:
+    7. Read EEPROM content in YAML format:
         $ eeprom_cli.py read --format yaml
         
-    7. Save EEPROM content to a file (format determined by extension):
+    8. Save EEPROM content to a file (format determined by extension):
         $ eeprom_cli.py read --output eeprom_data.yaml
         
-    8. Read and save device tree content:
-        $ eeprom_cli.py read --device-tree --output dt_data.json
+    9. Read specific custom data section from device tree:
+        $ eeprom_cli.py read --device-tree --index 1  # Read second section
         
-    9. Update serial number:
+    10. Update serial number:
         $ eeprom_cli.py write --serial ABC123XYZ
         
-    10. Reset EEPROM with custom settings:
+    11. Reset EEPROM with custom settings:
         $ eeprom_cli.py reset --settings my_settings.txt
         
-    11. Use custom configuration:
+    12. Use custom configuration:
         $ eeprom_cli.py -c config.yaml write -d data.json
 
 Options:
@@ -116,12 +119,14 @@ def main() -> int:
     read_parser.add_argument("--format", "-f", choices=["json", "yaml"], default="json", help="Output format (json or yaml)")
     read_parser.add_argument("--device-tree", "-d", action="store_true", help="Read from device tree instead of EEPROM")
     read_parser.add_argument("--output", "-o", type=Path, help="Save output to file (format determined by extension)")
+    read_parser.add_argument("--index", "-i", type=int, help="Read specific custom data section by index (0-based)")
     
     # Write command
     write_parser = subparsers.add_parser("write", help="Write to EEPROM")
     write_parser.add_argument("--serial", "-s", type=str, help="Serial number to write")
     write_parser.add_argument("--data", "-d", type=Path, action="append", help="Data file(s) to write (JSON/YAML). Can be specified multiple times for multiple sections.")
     write_parser.add_argument("--append", "-a", action="store_true", help="Append new data while preserving existing custom data")
+    write_parser.add_argument("--index", "-i", type=int, help="Replace custom data section at specified index (0-based)")
     
     # Reset command
     subparsers.add_parser("reset", help="Reset EEPROM to blank state")
@@ -165,15 +170,31 @@ def main() -> int:
         # Handle commands
         if args.command == "read":
             if args.device_tree:
-                data = eeprom.read_device_tree()
-                if not data:
-                    logger.error("Failed to read from device tree")
-                    return 1
+                if args.index is not None:
+                    data = eeprom.read_device_tree(args.index)
+                    if not data:
+                        logger.error(f"Failed to read section {args.index} from device tree")
+                        return 1
+                else:
+                    data = eeprom.read_device_tree()
+                    if not data:
+                        logger.error("Failed to read from device tree")
+                        return 1
             else:
                 data = eeprom.read_eeprom_content()
                 if not data:
                     logger.error("Failed to read EEPROM content")
                     return 1
+                    
+                # If index is specified, extract just that section
+                if args.index is not None:
+                    if "custom_data_all" not in data:
+                        logger.error("No custom data sections found")
+                        return 1
+                    if args.index < 0 or args.index >= len(data["custom_data_all"]):
+                        logger.error(f"Invalid index {args.index}. Must be between 0 and {len(data['custom_data_all'])-1}")
+                        return 1
+                    data = data["custom_data_all"][args.index]
             
             # Handle output
             if args.output:
@@ -207,10 +228,80 @@ def main() -> int:
             return 0
             
         elif args.command == "write":
-            if args.data:  # Renamed from args.json_file to args.data
+            if args.data:
                 try:
                     json_files = []
-                    if args.append:
+                    
+                    # Handle replace by index
+                    if args.index is not None:
+                        if len(args.data) > 1:
+                            logger.error("Cannot specify multiple data files when using --index")
+                            return 1
+                            
+                        # Read current content
+                        info = eeprom.read_eeprom_content()
+                        if not info:
+                            logger.error("Failed to read current EEPROM content for replace operation")
+                            return 1
+                            
+                        if "custom_data_all" not in info:
+                            logger.error("No existing custom data sections found")
+                            return 1
+                            
+                        if args.index < 0 or args.index >= len(info["custom_data_all"]):
+                            logger.error(f"Invalid index {args.index}. Must be between 0 and {len(info['custom_data_all'])-1}")
+                            return 1
+                            
+                        # Save all sections to temporary files
+                        for i, section in enumerate(info["custom_data_all"]):
+                            temp_json = eeprom.config.json_path / f"temp_current_{i}.json"
+                            try:
+                                with open(temp_json, "w") as f:
+                                    if isinstance(section, dict):
+                                        json.dump(section, f)
+                                    else:
+                                        json.dump({"data": section}, f)
+                                # Only add sections we want to keep
+                                if i != args.index:
+                                    json_files.append(str(temp_json))
+                            except Exception as e:
+                                logger.error(f"Failed to save custom data section {i}: {e}")
+                                # Clean up any temporary files created so far
+                                for tmp_file in json_files:
+                                    if "temp_current_" in tmp_file:
+                                        try:
+                                            os.remove(tmp_file)
+                                        except OSError:
+                                            pass
+                                return 1
+                                
+                        # Insert new file at the correct position
+                        data_file = args.data[0]
+                        try:
+                            with open(data_file) as f:
+                                content = f.read()
+                                # Try parsing as JSON first
+                                try:
+                                    json.loads(content)  # Just validate, don't store the result
+                                    logger.info(f"Validated {data_file} as JSON")
+                                except json.JSONDecodeError:
+                                    # Try parsing as YAML
+                                    try:
+                                        yaml.safe_load(content)  # Just validate, don't store the result
+                                        logger.info(f"Validated {data_file} as YAML")
+                                    except yaml.YAMLError as e:
+                                        logger.error(f"File {data_file} is neither valid JSON nor YAML: {e}")
+                                        return 1
+                                        
+                            # Insert the new file at the correct position
+                            json_files.insert(args.index, str(data_file))
+                            logger.info(f"Replacing custom data section at index {args.index}")
+                            
+                        except OSError as e:
+                            logger.error(f"Failed to read {data_file}: {e}")
+                            return 1
+                            
+                    elif args.append:
                         # Read current content to preserve all existing custom data sections
                         info = eeprom.read_eeprom_content()
                         if not info:
