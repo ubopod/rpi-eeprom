@@ -144,11 +144,17 @@ def test_parse_eeprom_text_valid(mock_file_handler, eeprom):
         'vendor "Test Vendor"\n',
         'product "Test Product"\n',
         'dt_blob "test_blob"\n',
+        # First section - JSON format
         "custom_data \"\n",
         '{"serial_number": "ABC123"}\n',
         "\\\"\n",
+        # Second section - JSON format
         "custom_data \"\n",
         '{"key": "value"}\n',
+        "\\\"\n",
+        # Third section - YAML format (with YAML-specific syntax)
+        "custom_data \"\n",
+        'serial_number: XYZ789\nmetadata: {key1: val1, key2: val2}\nlist: [1, 2, 3]\n',
         "\\\"\n",
     ]
     # Also set up readline for when it's explicitly called
@@ -156,6 +162,8 @@ def test_parse_eeprom_text_valid(mock_file_handler, eeprom):
         '{"serial_number": "ABC123"}\n',
         "\\\"\n",
         '{"key": "value"}\n',
+        "\\\"\n",
+        'serial_number: XYZ789\nmetadata: {key1: val1, key2: val2}\nlist: [1, 2, 3]\n',
         "\\\"\n",
     ]
     
@@ -170,11 +178,48 @@ def test_parse_eeprom_text_valid(mock_file_handler, eeprom):
     assert info["dt_blob"] == "test_blob"
     
     # Verify custom data sections
-    assert len(info["custom_data_all"]) == 2
+    assert len(info["custom_data_all"]) == 3
     assert isinstance(info["custom_data"], dict)  # First section should be parsed as JSON
-    assert info["custom_data"]["serial_number"] == "ABC123"
-    assert info["custom_data_all"][0]["serial_number"] == "ABC123"
-    assert info["custom_data_all"][1]["key"] == "value"  # Second section as raw string
+    assert info["custom_data"]["serial_number"] == "ABC123"  # First section serial number
+    assert info["custom_data_all"][0]["serial_number"] == "ABC123"  # First section
+    assert info["custom_data_all"][1]["key"] == "value"  # Second section
+    # Verify YAML-specific content
+    assert info["custom_data_all"][2]["serial_number"] == "XYZ789"
+    assert info["custom_data_all"][2]["metadata"] == {"key1": "val1", "key2": "val2"}
+    assert info["custom_data_all"][2]["list"] == [1, 2, 3]
+
+@patch('builtins.open')
+def test_parse_eeprom_text_yaml_fallback(mock_file_handler, eeprom):
+    """Test that parsing falls back to YAML when JSON fails."""
+    mock_file = mock_file_handler.return_value.__enter__.return_value
+    mock_file.__iter__.return_value = [
+        "product_uuid 12345678-1234-5678-1234-567812345678\n",
+        # YAML section with invalid JSON syntax
+        "custom_data \"\n",
+        'key1: value1\nkey2: {nested: value2}\n',  # This is valid YAML but invalid JSON
+        "\\\"\n",
+    ]
+    mock_file.readline.side_effect = [
+        'key1: value1\nkey2: {nested: value2}\n',
+        "\\\"\n",
+    ]
+    
+    info = eeprom._parse_eeprom_text()
+    
+    assert len(info["custom_data_all"]) == 1
+    assert isinstance(info["custom_data"], dict)
+    assert info["custom_data"]["key1"] == "value1"
+    assert info["custom_data"]["key2"] == {"nested": "value2"}
+
+def test_yaml_import():
+    """Test that YAML module is actually available and working."""
+    try:
+        import yaml
+        test_data = "key: value\nlist: [1, 2, 3]"
+        parsed = yaml.safe_load(test_data)
+        assert parsed == {"key": "value", "list": [1, 2, 3]}
+    except ImportError:
+        pytest.fail("PyYAML is required but not installed")
 
 def test_handle_existing_content_blank(eeprom):
     """Test handling blank EEPROM."""
