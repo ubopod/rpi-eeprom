@@ -2,6 +2,7 @@ import time
 import os
 import random
 import json
+import yaml
 import logging
 import platform
 from typing import Dict, Optional, Tuple, Any, Union
@@ -273,31 +274,43 @@ class EEPROM:
                     elif line.startswith("custom_data"):
                         logger.debug("Found custom_data section")
                         # Read all lines until we find the closing quote
-                        json_lines = []
+                        custom_data_lines = []
                         while True:
                             data_line = myfile.readline().strip()
                             if not data_line:
                                 continue
                             if data_line.endswith('\\\"'):  # Found closing quote
-                                json_lines.append(data_line[:-2])  # Remove closing quote
+                                custom_data_lines.append(data_line[:-2])  # Remove closing quote
                                 break
-                            json_lines.append(data_line)
+                            custom_data_lines.append(data_line)
                         
-                        if json_lines:
+                        if custom_data_lines:
+                            # Join lines and clean the data
+                            custom_data_str = ''.join(custom_data_lines).strip()
+                            custom_data_str = custom_data_str.strip('"')
+                            logger.debug(f"Raw custom data: {custom_data_str}")
+                            
+                            # Try parsing as JSON first
                             try:
-                                # Join lines and parse as JSON
-                                json_str = ''.join(json_lines).strip()
-                                # Remove any remaining quotes at start/end
-                                logger.info(f"JSON data before stripping: {json_str}")
-                                json_str = json_str.strip('"')
-                                logger.info(f"Parsing JSON data: {json_str}")
-                                parsed_data = json.loads(json_str)
+                                parsed_data = json.loads(custom_data_str)
+                                logger.info("Successfully parsed custom data as JSON")
                                 custom_data_sections.append(parsed_data)
-                                logger.info("Successfully parsed custom data section")
+                                continue
                             except json.JSONDecodeError as e:
-                                logger.error(f"Failed to parse custom data as JSON: {e}")
-                                logger.info(f"Raw data that failed to parse: {json_str}")
-                                custom_data_sections.append(json_str)
+                                logger.debug(f"JSON parsing failed: {e}")
+                            
+                            # Try parsing as YAML
+                            try:
+                                parsed_data = yaml.safe_load(custom_data_str)
+                                logger.info("Successfully parsed custom data as YAML")
+                                custom_data_sections.append(parsed_data)
+                                continue
+                            except yaml.YAMLError as e:
+                                logger.debug(f"YAML parsing failed: {e}")
+                            
+                            # If both JSON and YAML parsing failed, store as string
+                            logger.warning("Failed to parse as JSON or YAML, storing as string")
+                            custom_data_sections.append(custom_data_str)
                             
         except OSError as error:
             logger.error(f"Error reading EEPROM file: {error}")
