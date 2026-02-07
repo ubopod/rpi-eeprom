@@ -1,0 +1,37 @@
+name: Build Binaries
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 1 * *"  # Monthly
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cross-compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Clone raspberrypi/utils
+        run: git clone --depth 1 https://github.com/raspberrypi/utils /tmp/rpi-utils
+
+      - name: Cross-compile eeptools for aarch64
+        run: |
+          cd /tmp/rpi-utils/eeptools
+          cmake -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 .
+          make
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          cp /tmp/rpi-utils/eeptools/eepmake artifacts/
+          cp /tmp/rpi-utils/eeptools/eepdump artifacts/
+          cp /tmp/rpi-utils/eeptools/eepflash.sh artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: eeptools-aarch64
+          path: artifacts/

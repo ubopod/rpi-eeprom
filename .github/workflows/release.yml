@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Download pre-built binaries
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: build-binaries.yml
+          name: eeptools-aarch64
+          path: src/rpi_eeprom/_vendor/bin/
+        continue-on-error: true
+
+      - name: Set binary permissions
+        run: chmod +x src/rpi_eeprom/_vendor/bin/* 2>/dev/null || true
+
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
