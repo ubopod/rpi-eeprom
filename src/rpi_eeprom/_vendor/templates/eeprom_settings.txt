@@ -1,0 +1,8 @@
+# HAT EEPROM settings template
+# See https://github.com/raspberrypi/utils/tree/master/eeptools for details
+
+product_uuid 00000000-0000-0000-0000-000000000000
+product_id 0x0000
+product_ver 0x0001
+vendor "Ubopod"
+product "RPi HAT"
