@@ -56,10 +56,6 @@ include = [
     "THIRD_PARTY_NOTICES",
 ]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/rpi_eeprom/_vendor/bin" = "rpi_eeprom/_vendor/bin"
-"src/rpi_eeprom/_vendor/templates" = "rpi_eeprom/_vendor/templates"
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
