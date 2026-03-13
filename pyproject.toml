@@ -58,6 +58,10 @@ include = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "hardware: end-to-end tests that require a physical EEPROM on I2C (run with: sudo pytest -m hardware)",
+]
+addopts = "-m 'not hardware'"
 
 [tool.ruff]
 src = ["src", "tests"]
