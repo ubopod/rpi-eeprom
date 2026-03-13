@@ -93,7 +93,8 @@ class EEPROM:
         self.close()
 
     def close(self) -> None:
-        """Clean up temporary files and tool resources."""
+        """Clean up temporary files, tool resources, and GPIO pins."""
+        self._write_protect.close()
         self._tools.close()
         self._tmpdir.cleanup()
 

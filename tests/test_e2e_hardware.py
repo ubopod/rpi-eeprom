@@ -10,6 +10,7 @@ Run on a Raspberry Pi with an EEPROM attached::
 Prerequisites:
     - I2C overlay loaded: sudo dtoverlay i2c-gpio i2c_gpio_sda=0 i2c_gpio_scl=1 bus=9
     - eepmake, eepdump, eepflash.sh installed or bundled
+    - gpiozero installed: pip install rpi-eeprom[gpio]
     - sudo access (eepflash.sh requires it)
 """
 
@@ -20,6 +21,7 @@ from collections.abc import Generator
 import pytest
 
 from rpi_eeprom import EEPROM, EEPROMConfig
+from rpi_eeprom._gpio import MockWriteProtect
 from rpi_eeprom._tools import detect_i2c
 
 # Default hardware configuration — adjust if your setup differs
@@ -48,6 +50,12 @@ pytestmark = [
 def eeprom() -> Generator[EEPROM]:
     """Provide an EEPROM instance connected to real hardware."""
     with EEPROM(_HW_CONFIG) as e:
+        if isinstance(e._write_protect, MockWriteProtect):
+            pytest.fail(
+                "gpiozero is not installed — write-protect pin cannot be "
+                "toggled, so EEPROM writes will fail. "
+                "Install with: pip install rpi-eeprom[gpio]"
+            )
         yield e
 
 
