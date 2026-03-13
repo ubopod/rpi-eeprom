@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rpi-eeprom"
-version = "1.0.0"
+version = "1.1.0"
 description = "Raspberry Pi EEPROM management tool for reading, writing, and managing EEPROM content on RPi HAT devices"
 readme = "README.md"
 license = "Apache-2.0"
