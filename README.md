@@ -261,9 +261,9 @@ The `tests/test_e2e_hardware.py` suite runs against a real EEPROM chip over I2C.
    sudo dtoverlay i2c-gpio i2c_gpio_sda=0 i2c_gpio_scl=1 bus=9
    ```
 3. EEPROM tools installed (eepmake, eepdump, eepflash.sh) — see [Prerequisites](#prerequisites)
-4. Development dependencies:
+4. Development dependencies with GPIO support:
    ```bash
-   pip install -e ".[dev]"
+   pip install -e ".[dev,gpio]"
    ```
 
 #### Running hardware tests

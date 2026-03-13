@@ -22,6 +22,10 @@ class WriteProtect(Protocol):
         """Disable write protection (pin LOW)."""
         ...
 
+    def close(self) -> None:
+        """Release underlying resources (e.g. GPIO pin reservation)."""
+        ...
+
 
 class GPIOWriteProtect:
     """Real GPIO write-protect using gpiozero."""
@@ -36,6 +40,9 @@ class GPIOWriteProtect:
 
     def disable(self) -> None:
         self._device.off()
+
+    def close(self) -> None:
+        self._device.close()
 
 
 class MockWriteProtect:
@@ -53,6 +60,9 @@ class MockWriteProtect:
     def disable(self) -> None:
         self._enabled = False
         logger.debug("Mock write-protect disabled (pin %d)", self.pin)
+
+    def close(self) -> None:
+        self._enabled = False
 
 
 def _is_raspberry_pi() -> bool:
