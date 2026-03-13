@@ -236,7 +236,7 @@ A valid EEPROM must have a non-zero `product_uuid` and a `serial_number` in its 
 # Install in development mode with all dev tools
 pip install -e ".[dev]"
 
-# Run tests
+# Run tests (unit tests only — no hardware required)
 pytest tests/ -v
 
 # Run with coverage
@@ -247,6 +247,51 @@ ruff check src/ tests/
 
 # Type check
 mypy src/rpi_eeprom/
+```
+
+### Hardware end-to-end tests
+
+The `tests/test_e2e_hardware.py` suite runs against a real EEPROM chip over I2C. These tests are **skipped by default** and must be opted into explicitly.
+
+#### Prerequisites
+
+1. A Raspberry Pi with an EEPROM-equipped HAT connected
+2. I2C overlay loaded:
+   ```bash
+   sudo dtoverlay i2c-gpio i2c_gpio_sda=0 i2c_gpio_scl=1 bus=9
+   ```
+3. EEPROM tools installed (eepmake, eepdump, eepflash.sh) — see [Prerequisites](#prerequisites)
+4. Development dependencies:
+   ```bash
+   pip install -e ".[dev]"
+   ```
+
+#### Running hardware tests
+
+```bash
+# Run all hardware tests (requires sudo for I2C access)
+sudo pytest tests/test_e2e_hardware.py -v -m hardware
+
+# Run a specific hardware test
+sudo pytest tests/test_e2e_hardware.py -v -m hardware -k "test_full_lifecycle"
+
+# Run both unit and hardware tests together
+sudo pytest tests/ -v -m ""
+```
+
+> **Warning:** Hardware tests **write to and erase the EEPROM**. Any existing data on the chip will be overwritten. The test suite resets the EEPROM to a blank state at the end of the full lifecycle test. If tests are interrupted, the EEPROM may be left in a partially written state.
+
+#### Custom hardware configuration
+
+The tests use the default `EEPROMConfig` (bus=9, address=0x50, model=24c32). If your hardware differs, edit the `_HW_CONFIG` variable at the top of `tests/test_e2e_hardware.py`:
+
+```python
+_HW_CONFIG = EEPROMConfig(
+    model="24c64",
+    i2c_bus=1,
+    i2c_address=0x51,
+    write_protect_pin=17,
+)
 ```
 
 ## License
