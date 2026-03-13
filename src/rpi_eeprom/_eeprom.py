@@ -197,9 +197,13 @@ class EEPROM:
         data_files = self._prepare_custom_data_files(custom_data)
 
         try:
-            self.reset()
-            image = self._make_image(template, data_files)
-            self._eepflash_write(image)
+            self._write_protect.disable()
+            try:
+                self._blank_and_verify()
+                image = self._make_image(template, data_files)
+                self._eepflash_write(image)
+            finally:
+                self._write_protect.enable()
             logger.info("EEPROM write completed successfully")
         except EEPROMWriteError:
             raise
@@ -269,7 +273,7 @@ class EEPROM:
             image = self._make_image(stripped_dump, data_files)
             self._write_protect.disable()
             try:
-                self.reset()
+                self._blank_and_verify()
                 self._eepflash_write(image)
             finally:
                 self._write_protect.enable()
@@ -288,32 +292,36 @@ class EEPROM:
         """
         self._require_detected()
 
-        blank = self._workdir / "blank.eep"
-        blank_readback = self._workdir / "blank_readback.eep"
-
         try:
             self._write_protect.disable()
-
-            # Create blank binary
-            blank.write_bytes(b"\x00" * (self._config.size_kbytes * 1024))
-
-            # Write blank to EEPROM
-            self._eepflash_write(blank)
-            time.sleep(0.5)
-
-            # Read back and verify
-            self._eepflash_read(blank_readback)
-            content = blank_readback.read_bytes()
-            if any(byte != 0 for byte in content):
-                raise EEPROMWriteError("EEPROM verification failed — not blank")
-
-            logger.info("EEPROM successfully blanked and verified")
+            try:
+                self._blank_and_verify()
+            finally:
+                self._write_protect.enable()
         except EEPROMWriteError:
             raise
         except (subprocess.CalledProcessError, OSError) as e:
             raise EEPROMWriteError(f"Failed to reset EEPROM: {e}") from e
-        finally:
-            self._write_protect.enable()
+
+    def _blank_and_verify(self) -> None:
+        """Write zeros to the EEPROM and verify. Caller must manage write-protect."""
+        blank = self._workdir / "blank.eep"
+        blank_readback = self._workdir / "blank_readback.eep"
+
+        # Create blank binary
+        blank.write_bytes(b"\x00" * (self._config.size_kbytes * 1024))
+
+        # Write blank to EEPROM
+        self._eepflash_write(blank)
+        time.sleep(0.5)
+
+        # Read back and verify
+        self._eepflash_read(blank_readback)
+        content = blank_readback.read_bytes()
+        if any(byte != 0 for byte in content):
+            raise EEPROMWriteError("EEPROM verification failed — not blank")
+
+        logger.info("EEPROM successfully blanked and verified")
 
     @staticmethod
     def generate_serial_number(length: int = 12) -> str:
